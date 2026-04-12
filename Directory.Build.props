@@ -1,7 +1,0 @@
-<Project>
-  <!-- Applied to every project in the solution -->
-  <PropertyGroup>
-    <!-- No PDB files in Release builds — keeps the publish output clean -->
-    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
-  </PropertyGroup>
-</Project>
