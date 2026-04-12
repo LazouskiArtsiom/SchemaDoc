@@ -36,9 +36,9 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -o publish/SchemaDoc
 
-      - name: Zip release
+      - name: Rename exe for release
         run: |
-          Compress-Archive -Path publish/SchemaDoc/* -DestinationPath SchemaDoc-win-x64.zip
+          Copy-Item publish/SchemaDoc/SchemaDoc.Web.exe SchemaDoc-win-x64.exe
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -48,10 +48,10 @@ jobs:
             ## SchemaDoc ${{ github.ref_name }}
 
             ### Download & Run
-            1. Download the zip below
-            2. Extract all files to any folder
-            3. Run `SchemaDoc.Web.exe` — your browser opens automatically at `http://localhost:5000`
-            4. Open `landing.html` in a browser for the product overview page
+            1. Download `SchemaDoc-win-x64.exe` below
+            2. Double-click it — your browser opens automatically at `http://localhost:5000`
+
+            No extraction, no installation, no .NET required.
 
             ### Supported databases
             - SQL Server
@@ -61,7 +61,6 @@ jobs:
 
             ### Requirements
             - Windows x64
-            - No .NET installation needed (fully self-contained)
-          files: SchemaDoc-win-x64.zip
+          files: SchemaDoc-win-x64.exe
           draft: false
           prerelease: false

@@ -18,6 +18,24 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Single-file distribution: no PDBs, no IIS web.config, no static asset manifest -->
+    <DebugType>none</DebugType>
+    <IsPublishable>true</IsPublishable>
+    <PublishIISAssets>false</PublishIISAssets>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
   </PropertyGroup>
+
+  <!-- Embed all wwwroot files into the assembly so no wwwroot folder is needed at runtime -->
+  <ItemGroup>
+    <Content Remove="wwwroot\**" />
+    <EmbeddedResource Include="wwwroot\**\*" />
+  </ItemGroup>
+
+  <!-- Exclude dev-only config from publish output -->
+  <ItemGroup>
+    <Content Update="appsettings.Development.json">
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
 
 </Project>

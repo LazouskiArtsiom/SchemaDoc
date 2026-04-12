@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using SchemaDoc.Core.Interfaces;
 using SchemaDoc.Core.Services;
 using SchemaDoc.Extraction;
@@ -76,8 +77,13 @@ else
 {
     app.UseHttpsRedirection();
 }
+// Serve wwwroot files from embedded assembly resources (enables single-file exe distribution)
+var embeddedProvider = new EmbeddedFileProvider(
+    typeof(Program).Assembly,
+    "SchemaDoc.Web.wwwroot");
+app.UseStaticFiles(new StaticFileOptions { FileProvider = embeddedProvider });
+
 app.UseAntiforgery();
-app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
