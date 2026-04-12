@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SchemaDoc — Explore your database schema</title>
+  <meta name="description" content="A lightweight desktop tool to explore, visualise, and document SQL Server, PostgreSQL, MySQL, and Azure Cosmos DB schemas." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #060e1e;
+      --bg-card:     #0c1a30;
+      --bg-card-2:   #0f2040;
+      --border:      #1a3050;
+      --accent:      #4f46e5;
+      --accent-hover:#4338ca;
+      --accent-glow: rgba(79,70,229,0.25);
+      --text:        #eef4ff;
+      --text-sub:    #6a88a8;
+      --text-muted:  #3a5070;
+      --green:       #4ade80;
+      --purple:      #c084fc;
+      --amber:       #fbbf24;
+      --red:         #f87171;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      letter-spacing: -0.01em;
+      line-height: 1.6;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: #818cf8; }
+
+    /* ── Nav ─────────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 60px;
+      background: rgba(6,14,30,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.03em;
+    }
+
+    .nav-logo svg { color: #818cf8; }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      font-size: 0.8rem;
+      color: var(--text-sub);
+    }
+
+    .nav-links a { color: var(--text-sub); transition: color 0.2s; }
+    .nav-links a:hover { color: var(--text); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 1.2rem;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+      letter-spacing: -0.01em;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      color: #fff;
+      box-shadow: 0 0 32px var(--accent-glow);
+      transform: translateY(-1px);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover {
+      background: var(--bg-card);
+      color: var(--text);
+      border-color: #2a4060;
+    }
+
+    /* ── Hero ────────────────────────────────────────────── */
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 7rem 2rem 5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -120px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 700px;
+      height: 700px;
+      background: radial-gradient(circle, rgba(79,70,229,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.9rem;
+      border-radius: 999px;
+      border: 1px solid rgba(129,140,248,0.3);
+      background: rgba(79,70,229,0.1);
+      color: #a5b4fc;
+      font-size: 0.72rem;
+      font-weight: 500;
+      margin-bottom: 2rem;
+      letter-spacing: 0.02em;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.2rem, 5vw, 3.8rem);
+      font-weight: 700;
+      line-height: 1.15;
+      letter-spacing: -0.04em;
+      max-width: 780px;
+      margin-bottom: 1.4rem;
+    }
+
+    .hero h1 .accent { color: #818cf8; }
+
+    .hero p {
+      font-size: 1.05rem;
+      color: var(--text-sub);
+      max-width: 560px;
+      margin-bottom: 2.5rem;
+      font-weight: 400;
+      line-height: 1.7;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    /* ── App preview ─────────────────────────────────────── */
+    .preview-wrap {
+      max-width: 1000px;
+      margin: 4rem auto 0;
+      padding: 0 2rem;
+    }
+
+    .preview-window {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      overflow: hidden;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
+    }
+
+    .preview-titlebar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      background: #08121e;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .preview-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+    }
+    .dot-red    { background: #ff5f56; }
+    .dot-yellow { background: #ffbd2e; }
+    .dot-green  { background: #27c93f; }
+
+    .preview-url {
+      flex: 1;
+      text-align: center;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-left: 0.5rem;
+    }
+
+    .preview-body {
+      display: flex;
+      height: 420px;
+    }
+
+    .preview-sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      background: #0c1a30;
+      border-right: 1px solid var(--border);
+      padding: 1rem;
+    }
+
+    .preview-sidebar-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #818cf8;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .ps-conn {
+      font-size: 0.72rem;
+      padding: 0.3rem 0.5rem;
+      border-radius: 5px;
+      margin-bottom: 0.25rem;
+      cursor: pointer;
+    }
+
+    .ps-conn.active {
+      background: rgba(79,70,229,0.2);
+      color: #a5b4fc;
+    }
+
+    .ps-conn.inactive { color: var(--text-sub); }
+
+    .ps-section {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      margin: 0.75rem 0 0.4rem;
+    }
+
+    .ps-table {
+      font-size: 0.72rem;
+      color: var(--text-sub);
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+    }
+    .ps-table:hover { background: var(--bg-card-2); color: var(--text); }
+
+    .preview-main {
+      flex: 1;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.8rem;
+    }
+
+    .preview-db-name {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+
+    .preview-stats {
+      font-size: 0.78rem;
+      color: var(--text-sub);
+    }
+
+    .preview-btns {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 0.5rem;
+    }
+
+    .preview-btn {
+      padding: 0.4rem 0.9rem;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      background: var(--bg-card-2);
+      color: var(--text-sub);
+      cursor: pointer;
+    }
+
+    .preview-btn.purple { color: var(--purple); border-color: rgba(192,132,252,0.3); }
+    .preview-btn.green  { color: var(--green);  border-color: rgba(74,222,128,0.3);  }
+
+    .preview-schemas {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 0.5rem;
+    }
+
+    .schema-badge {
+      padding: 0.25rem 0.7rem;
+      border-radius: 999px;
+      background: var(--bg-card-2);
+      border: 1px solid var(--border);
+      font-size: 0.68rem;
+      color: var(--text-sub);
+    }
+
+    /* ── Section layout ──────────────────────────────────── */
+    section {
+      padding: 5rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: #818cf8;
+      text-transform: uppercase;
+      margin-bottom: 0.75rem;
+    }
+
+    .section-title {
+      font-size: clamp(1.6rem, 3vw, 2.4rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 1rem;
+    }
+
+    .section-sub {
+      font-size: 0.92rem;
+      color: var(--text-sub);
+      max-width: 520px;
+      line-height: 1.7;
+      margin-bottom: 3rem;
+    }
+
+    /* ── Features grid ───────────────────────────────────── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: #2a4060;
+      transform: translateY(-2px);
+    }
+
+    .feature-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1rem;
+      font-size: 1.2rem;
+    }
+
+    .feature-card h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .feature-card p {
+      font-size: 0.8rem;
+      color: var(--text-sub);
+      line-height: 1.6;
+    }
+
+    /* ── Databases ───────────────────────────────────────── */
+    .db-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+
+    .db-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      transition: border-color 0.2s;
+    }
+
+    .db-card:hover { border-color: #2a4060; }
+
+    .db-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      flex-shrink: 0;
+    }
+
+    .db-info h4 {
+      font-size: 0.88rem;
+      font-weight: 600;
+      margin-bottom: 0.2rem;
+    }
+
+    .db-info p {
+      font-size: 0.72rem;
+      color: var(--text-sub);
+    }
+
+    /* ── How it works ────────────────────────────────────── */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.5rem;
+      position: relative;
+    }
+
+    .step {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .step-num {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: rgba(79,70,229,0.15);
+      border: 1px solid rgba(129,140,248,0.3);
+      color: #a5b4fc;
+      font-size: 0.85rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .step h4 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    .step p {
+      font-size: 0.8rem;
+      color: var(--text-sub);
+      line-height: 1.6;
+    }
+
+    /* ── CTA ─────────────────────────────────────────────── */
+    .cta-section {
+      text-align: center;
+      padding: 5rem 2rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .cta-section h2 {
+      font-size: clamp(1.6rem, 3vw, 2.4rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 1rem;
+    }
+
+    .cta-section p {
+      color: var(--text-sub);
+      font-size: 0.9rem;
+      margin-bottom: 2rem;
+    }
+
+    /* ── Footer ──────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .footer-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 600;
+      color: var(--text-sub);
+    }
+
+    /* ── Responsive ──────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .preview-body { flex-direction: column; height: auto; }
+      .preview-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); height: 160px; overflow: hidden; }
+      .nav-links .hide-mobile { display: none; }
+      footer { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Navigation ──────────────────────────────────────────── -->
+<nav>
+  <div class="nav-logo">
+    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+    </svg>
+    SchemaDoc
+  </div>
+  <div class="nav-links">
+    <a href="#features" class="hide-mobile">Features</a>
+    <a href="#databases" class="hide-mobile">Databases</a>
+    <a href="#how-it-works" class="hide-mobile">How it works</a>
+    <a href="https://github.com/LazouskiArtsiom/SchemaDoc" target="_blank" class="btn btn-ghost">
+      <svg width="15" height="15" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577v-2.165c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.929.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.63-5.37-12-12-12z"/>
+      </svg>
+      GitHub
+    </a>
+    <a href="https://github.com/LazouskiArtsiom/SchemaDoc/releases/latest" class="btn btn-primary">
+      Download
+    </a>
+  </div>
+</nav>
+
+<!-- ── Hero ────────────────────────────────────────────────── -->
+<div class="hero">
+  <div class="badge">
+    <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3l14 9-14 9V3z"/>
+    </svg>
+    Free & Open Source · Windows x64
+  </div>
+
+  <h1>Explore your database schema.<br/><span class="accent">Instantly.</span></h1>
+
+  <p>
+    A lightweight desktop tool for developers and DBAs to explore, visualise,
+    and document SQL Server, PostgreSQL, MySQL, and Cosmos DB schemas —
+    without writing a single query.
+  </p>
+
+  <div class="hero-actions">
+    <a href="https://github.com/LazouskiArtsiom/SchemaDoc/releases/latest" class="btn btn-primary">
+      <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+      </svg>
+      Download for Windows
+    </a>
+    <a href="https://github.com/LazouskiArtsiom/SchemaDoc" target="_blank" class="btn btn-ghost">
+      View source on GitHub
+    </a>
+  </div>
+
+  <!-- App mockup -->
+  <div class="preview-wrap">
+    <div class="preview-window">
+      <div class="preview-titlebar">
+        <div class="preview-dot dot-red"></div>
+        <div class="preview-dot dot-yellow"></div>
+        <div class="preview-dot dot-green"></div>
+        <div class="preview-url">localhost:5000</div>
+      </div>
+      <div class="preview-body">
+        <div class="preview-sidebar">
+          <div class="preview-sidebar-logo">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+            </svg>
+            SchemaDoc
+          </div>
+          <div class="ps-conn active">▶ BookstoreDB</div>
+          <div class="ps-conn inactive">PostgreSQL_Dev</div>
+          <div class="ps-conn inactive">EcommerceDB</div>
+          <div class="ps-section">TABLES · 11</div>
+          <div class="ps-table">Authors</div>
+          <div class="ps-table">Books</div>
+          <div class="ps-table">Categories</div>
+          <div class="ps-table">Orders</div>
+          <div class="ps-table">Customers</div>
+        </div>
+        <div class="preview-main">
+          <div style="font-size:2.5rem">✅</div>
+          <div class="preview-db-name">BookstoreDB</div>
+          <div class="preview-stats">11 tables · 2 views · 9 procedures · 12 relationships</div>
+          <div class="preview-btns">
+            <button class="preview-btn purple">⬡ ER Diagram</button>
+            <button class="preview-btn green">↓ Export PDF</button>
+            <button class="preview-btn">↻ Refresh Schema</button>
+          </div>
+          <div class="preview-schemas">
+            <span class="schema-badge">Catalog (5)</span>
+            <span class="schema-badge">Membership (2)</span>
+            <span class="schema-badge">Sales (3)</span>
+            <span class="schema-badge">dbo (1)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Features ─────────────────────────────────────────────── -->
+<section id="features">
+  <div class="section-label">Features</div>
+  <h2 class="section-title">Everything you need to understand your schema</h2>
+  <p class="section-sub">
+    No configuration, no cloud, no data ever leaves your machine.
+    Just run and connect.
+  </p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(129,140,248,0.1)">⬡</div>
+      <h3>ER Diagrams</h3>
+      <p>Auto-generated entity-relationship diagrams with column types, PK/FK annotations, and relationship arrows labeled with column-to-column info.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(74,222,128,0.1)">↓</div>
+      <h3>PDF Export</h3>
+      <p>Export your full schema documentation as a PDF — perfect for sharing with teammates or archiving snapshots of your database structure.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(251,191,36,0.1)">⇄</div>
+      <h3>Schema Diff</h3>
+      <p>Compare two snapshots side by side. Instantly see which tables and columns were added, removed, or modified between versions.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(192,132,252,0.1)">⚡</div>
+      <h3>Instant switching</h3>
+      <p>Keep multiple connections active simultaneously. Switch between databases in one click — schemas are cached locally for zero-latency switching.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(248,113,113,0.1)">🔒</div>
+      <h3>Encrypted storage</h3>
+      <p>Connection strings are encrypted with Windows DPAPI and stored locally. Nothing is ever sent to any server or third party.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:rgba(79,70,229,0.1)">◑</div>
+      <h3>Dark &amp; light mode</h3>
+      <p>Fully theme-aware UI with persistent preference. Diagrams re-render automatically when you switch modes.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Databases ─────────────────────────────────────────────── -->
+<section id="databases" style="padding-top:0">
+  <div class="section-label">Supported databases</div>
+  <h2 class="section-title">Connect to any of these</h2>
+  <p class="section-sub">
+    One tool. Four database engines. More coming soon.
+  </p>
+
+  <div class="db-grid">
+    <div class="db-card">
+      <div class="db-icon" style="background:rgba(0,114,198,0.12)">🗄️</div>
+      <div class="db-info">
+        <h4>SQL Server</h4>
+        <p>Tables, views, stored procedures, FK relationships, schemas</p>
+      </div>
+    </div>
+    <div class="db-card">
+      <div class="db-icon" style="background:rgba(51,103,145,0.15)">🐘</div>
+      <div class="db-info">
+        <h4>PostgreSQL</h4>
+        <p>Full information_schema extraction including functions</p>
+      </div>
+    </div>
+    <div class="db-card">
+      <div class="db-icon" style="background:rgba(0,117,143,0.15)">🐬</div>
+      <div class="db-info">
+        <h4>MySQL</h4>
+        <p>Complete schema extraction via MySqlConnector</p>
+      </div>
+    </div>
+    <div class="db-card">
+      <div class="db-icon" style="background:rgba(79,70,229,0.12)">☁️</div>
+      <div class="db-info">
+        <h4>Azure Cosmos DB</h4>
+        <p>Containers with partition key and ID — cloud &amp; emulator</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── How it works ──────────────────────────────────────────── -->
+<section id="how-it-works">
+  <div class="section-label">How it works</div>
+  <h2 class="section-title">Up and running in 60 seconds</h2>
+  <p class="section-sub">No installation wizard, no account, no setup.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <h4>Download &amp; run</h4>
+      <p>Download the zip, extract it, and double-click <code style="color:#a5b4fc">SchemaDoc.Web.exe</code>. Your browser opens automatically.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <h4>Add a connection</h4>
+      <p>Paste your connection string for SQL Server, PostgreSQL, MySQL, or Cosmos DB. It's stored encrypted on your machine.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <h4>Explore</h4>
+      <p>Browse tables, view columns and row counts, generate ER diagrams, export PDFs, and compare schema versions.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ───────────────────────────────────────────────────── -->
+<div class="cta-section">
+  <h2>Ready to explore your schema?</h2>
+  <p>Free, open source, no sign-up required.</p>
+  <a href="https://github.com/LazouskiArtsiom/SchemaDoc/releases/latest" class="btn btn-primary" style="font-size:0.9rem;padding:0.7rem 1.6rem">
+    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+    </svg>
+    Download SchemaDoc — it's free
+  </a>
+</div>
+
+<!-- ── Footer ────────────────────────────────────────────────── -->
+<footer>
+  <div class="footer-logo">
+    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+    </svg>
+    SchemaDoc
+  </div>
+  <div>Built by <a href="https://github.com/LazouskiArtsiom" target="_blank">Artsiom Lazouski</a></div>
+  <div>
+    <a href="https://github.com/LazouskiArtsiom/SchemaDoc" target="_blank">GitHub</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/LazouskiArtsiom/SchemaDoc/releases" target="_blank">Releases</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/LazouskiArtsiom/SchemaDoc/issues" target="_blank">Issues</a>
+  </div>
+</footer>
+
+</body>
+</html>

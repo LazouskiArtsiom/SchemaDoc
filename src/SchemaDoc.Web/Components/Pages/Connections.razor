@@ -1,0 +1,256 @@
+@page "/connections"
+@layout SchemaDoc.Web.Components.Layout.MainLayout
+@inject IConnectionRepository ConnectionRepo
+@inject SchemaDoc.Web.Services.SchemaSessionState State
+@inject SchemaDoc.Web.Services.SchemaLoaderService SchemaLoader
+@inject NavigationManager Nav
+
+<PageTitle>Connections – SchemaDoc</PageTitle>
+
+<div class="p-8 max-w-3xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">Connections</h1>
+        <button class="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                @onclick="ShowAddForm">
+            + Add Connection
+        </button>
+    </div>
+
+    <!-- Connection list -->
+    @if (connections.Count == 0 && !showForm)
+    {
+        <div class="text-center py-12 text-gray-400 dark:text-gray-500">
+            <div class="text-4xl mb-3">🔌</div>
+            <p>No connections yet. Add one to get started.</p>
+        </div>
+    }
+
+    @if (errorMessage is not null && !showForm)
+    {
+        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm rounded-lg px-4 py-3 mb-4">
+            @errorMessage
+        </div>
+    }
+
+    <div class="space-y-3 mb-6">
+        @foreach (var conn in connections)
+        {
+            var isActive = State.ActiveConnection?.Id == conn.Id;
+            <div class="bg-white dark:bg-gray-800 border @(isActive ? "border-blue-300 dark:border-blue-700" : "border-gray-200 dark:border-gray-700") rounded-xl p-4 flex items-center justify-between">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-medium text-gray-800 dark:text-gray-100">@conn.Name</span>
+                        @if (isActive)
+                        {
+                            <span class="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">Active</span>
+                        }
+                    </div>
+                    <div class="text-sm text-gray-400 dark:text-gray-500 flex items-center gap-2 mt-0.5">
+                        <span class="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded text-xs">@conn.Provider</span>
+                        @if (conn.LastDatabaseName is not null)
+                        {
+                            <span>@conn.LastDatabaseName</span>
+                        }
+                        <span>Last used @conn.LastConnectedAt.ToLocalTime().ToString("g")</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button class="text-sm px-3 py-1.5 rounded-lg transition-colors @(isActive ? "bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-default" : "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50")"
+                            @onclick="() => ConnectAsync(conn)"
+                            disabled="@(loading || isActive)">
+                        @if (loadingId == conn.Id)
+                        {
+                            <span>Connecting...</span>
+                        }
+                        else if (isActive)
+                        {
+                            <span>Connected</span>
+                        }
+                        else
+                        {
+                            <span>Connect</span>
+                        }
+                    </button>
+                    <button class="text-sm text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 px-2 py-1.5 transition-colors"
+                            @onclick="() => DeleteAsync(conn.Id)">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Add form -->
+    @if (showForm)
+    {
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6">
+            <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">New Connection</h2>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+                    <input type="text" @bind="formName" @bind:event="oninput" placeholder="e.g. Production AdventureWorks"
+                           class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Database Type</label>
+                    <select @bind="formProvider"
+                            class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                        <option value="@DatabaseProvider.SqlServer">SQL Server</option>
+                        <option value="@DatabaseProvider.PostgreSql">PostgreSQL</option>
+                        <option value="@DatabaseProvider.MySql">MySQL</option>
+                        <option value="@DatabaseProvider.CosmosDb">Azure Cosmos DB</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Connection String</label>
+                    <textarea @bind="formConnectionString" @bind:event="oninput" rows="3"
+                              placeholder="@ConnectionStringPlaceholder"
+                              class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm font-mono bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300"></textarea>
+                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Stored encrypted on your machine. Never sent anywhere.</p>
+                    @if (formProvider == DatabaseProvider.CosmosDb)
+                    {
+                        <p class="text-xs text-blue-500 dark:text-blue-400 mt-1">
+                            Emulator: <span class="font-mono">AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b5KZzAq/3+1/Ue2HbgL9C5E3D0m3A==;</span>
+                        </p>
+                    }
+                </div>
+
+                @if (errorMessage is not null)
+                {
+                    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm rounded-lg px-3 py-2">
+                        @errorMessage
+                    </div>
+                }
+
+                <div class="flex gap-3 pt-2">
+                    <button class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                            @onclick="SaveAsync" disabled="@saving">
+                        @(saving ? "Testing..." : "Save & Connect")
+                    </button>
+                    <button class="text-gray-500 dark:text-gray-400 px-4 py-2 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            @onclick="() => showForm = false">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ConnectionProfile> connections = [];
+    private bool showForm;
+    private bool loading;
+    private bool saving;
+    private int? loadingId;
+    private string? errorMessage;
+
+    private string formName = "";
+    private DatabaseProvider formProvider = DatabaseProvider.SqlServer;
+    private string formConnectionString = "";
+
+    private string ConnectionStringPlaceholder => formProvider switch
+    {
+        DatabaseProvider.SqlServer  => "Server=.;Database=MyDb;Trusted_Connection=True;TrustServerCertificate=True;",
+        DatabaseProvider.PostgreSql => "Host=localhost;Port=5432;Database=MyDb;Username=postgres;Password=secret;",
+        DatabaseProvider.MySql      => "Server=localhost;Port=3306;Database=MyDb;User=root;Password=secret;",
+        DatabaseProvider.CosmosDb   => "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8...;",
+        _                           => "Enter connection string..."
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        connections = (await ConnectionRepo.GetAllAsync()).ToList();
+    }
+
+    private void ShowAddForm()
+    {
+        showForm = true;
+        errorMessage = null;
+        formName = "";
+        formConnectionString = "";
+        formProvider = DatabaseProvider.SqlServer;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(formName) || string.IsNullOrWhiteSpace(formConnectionString))
+        {
+            errorMessage = "Name and connection string are required.";
+            return;
+        }
+
+        saving = true;
+        errorMessage = null;
+
+        try
+        {
+            var ok = await SchemaLoader.TestConnectionAsync(formProvider, formConnectionString);
+            if (!ok)
+            {
+                errorMessage = "Could not connect. Please check your connection string.";
+                return;
+            }
+
+            var id = await ConnectionRepo.AddAsync(formName, formProvider, formConnectionString);
+            showForm = false;
+            connections = (await ConnectionRepo.GetAllAsync()).ToList();
+
+            var profile = connections.First(c => c.Id == id);
+            await ConnectAsync(profile);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task ConnectAsync(ConnectionProfile conn)
+    {
+        // If already cached, switch instantly
+        var cached = State.GetCachedSchema(conn.Id);
+        if (cached is not null)
+        {
+            State.SetActiveConnection(conn, cached);
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        loading = true;
+        loadingId = conn.Id;
+        errorMessage = null;
+
+        try
+        {
+            var schema = await SchemaLoader.LoadSchemaAsync(conn.Id, conn.Provider, forceRefresh: false);
+            State.SetActiveConnection(conn, schema);
+            await ConnectionRepo.TouchLastConnectedAsync(conn.Id, schema.DatabaseName);
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to load schema: {ex.Message}";
+        }
+        finally
+        {
+            loading = false;
+            loadingId = null;
+        }
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        if (State.ActiveConnection?.Id == id)
+            State.Clear();
+
+        await ConnectionRepo.DeleteAsync(id);
+        connections = (await ConnectionRepo.GetAllAsync()).ToList();
+    }
+}

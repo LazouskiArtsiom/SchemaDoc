@@ -1,0 +1,118 @@
+@page "/export"
+@layout SchemaDoc.Web.Components.Layout.MainLayout
+@inject SchemaDoc.Web.Services.SchemaSessionState SessionState
+@inject IPdfExporter PdfExporter
+@inject IAnnotationRepository AnnotationRepo
+@inject IJSRuntime JS
+
+<PageTitle>Export - SchemaDoc</PageTitle>
+
+<div class="p-8 max-w-3xl mx-auto">
+    <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-6">Export Documentation</h1>
+
+    @if (SessionState.CurrentSchema is null || SessionState.ActiveConnection is null)
+    {
+        <div class="text-center py-16 text-gray-400 dark:text-gray-500">
+            <div class="text-5xl mb-4">&#128196;</div>
+            <p class="text-lg mb-2">No schema loaded</p>
+            <p class="text-sm">Connect to a database first from the
+                <a href="/connections" class="text-blue-500 hover:underline">Connections</a> page.
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Database Summary</h2>
+            <div class="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                    <span class="text-gray-500 dark:text-gray-400">Database</span>
+                    <p class="font-medium text-gray-800 dark:text-gray-100">@SessionState.CurrentSchema.DatabaseName</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 dark:text-gray-400">Provider</span>
+                    <p class="font-medium text-gray-800 dark:text-gray-100">@SessionState.CurrentSchema.Provider</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 dark:text-gray-400">Tables</span>
+                    <p class="font-medium text-gray-800 dark:text-gray-100">@SessionState.CurrentSchema.Tables.Count</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 dark:text-gray-400">Views</span>
+                    <p class="font-medium text-gray-800 dark:text-gray-100">@SessionState.CurrentSchema.Views.Count</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 dark:text-gray-400">Stored Procedures</span>
+                    <p class="font-medium text-gray-800 dark:text-gray-100">@SessionState.CurrentSchema.StoredProcedures.Count</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 dark:text-gray-400">Foreign Keys</span>
+                    <p class="font-medium text-gray-800 dark:text-gray-100">@SessionState.CurrentSchema.ForeignKeys.Count</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 dark:text-gray-400">Extracted At</span>
+                    <p class="font-medium text-gray-800 dark:text-gray-100">@SessionState.CurrentSchema.ExtractedAt.ToLocalTime().ToString("g")</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 dark:text-gray-400">Connection</span>
+                    <p class="font-medium text-gray-800 dark:text-gray-100">@SessionState.ActiveConnection.Name</p>
+                </div>
+            </div>
+        </div>
+
+        @if (errorMessage is not null)
+        {
+            <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm rounded-lg px-4 py-3 mb-4">
+                @errorMessage
+            </div>
+        }
+
+        <button class="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                @onclick="DownloadPdfAsync"
+                disabled="@generating">
+            @if (generating)
+            {
+                <span>Generating PDF...</span>
+            }
+            else
+            {
+                <span>Download PDF</span>
+            }
+        </button>
+    }
+</div>
+
+@code {
+    private bool generating;
+    private string? errorMessage;
+
+    private async Task DownloadPdfAsync()
+    {
+        if (SessionState.CurrentSchema is null || SessionState.ActiveConnection is null)
+            return;
+
+        generating = true;
+        errorMessage = null;
+
+        try
+        {
+            var annotations = await AnnotationRepo.GetAllForConnectionAsync(
+                SessionState.ActiveConnection.Name,
+                SessionState.CurrentSchema.DatabaseName);
+
+            var pdfBytes = PdfExporter.GeneratePdf(SessionState.CurrentSchema, annotations);
+
+            var fileName = $"{SessionState.CurrentSchema.DatabaseName}_schema_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
+
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "application/pdf", pdfBytes);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to generate PDF: {ex.Message}";
+        }
+        finally
+        {
+            generating = false;
+        }
+    }
+}

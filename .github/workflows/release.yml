@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore
+        run: dotnet restore src/SchemaDoc.Web/SchemaDoc.Web.csproj
+
+      - name: Publish (self-contained single file)
+        run: |
+          dotnet publish src/SchemaDoc.Web/SchemaDoc.Web.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/SchemaDoc
+
+      - name: Zip release
+        run: |
+          Compress-Archive -Path publish/SchemaDoc/* -DestinationPath SchemaDoc-${{ github.ref_name }}-win-x64.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SchemaDoc ${{ github.ref_name }}
+          body: |
+            ## SchemaDoc ${{ github.ref_name }}
+
+            ### Download
+            Extract the zip and run `SchemaDoc.Web.exe`. Your browser will open automatically.
+
+            ### Supported databases
+            - SQL Server
+            - PostgreSQL
+            - MySQL
+            - Azure Cosmos DB (cloud + emulator)
+
+            ### Requirements
+            - Windows x64
+            - No .NET installation needed (self-contained)
+          files: SchemaDoc-${{ github.ref_name }}-win-x64.zip
+          draft: false
+          prerelease: false

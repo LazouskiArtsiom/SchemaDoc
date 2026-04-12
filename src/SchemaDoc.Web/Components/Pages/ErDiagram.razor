@@ -1,0 +1,140 @@
+@page "/diagram"
+@layout SchemaDoc.Web.Components.Layout.MainLayout
+@inject SchemaDoc.Web.Services.SchemaSessionState State
+@inject IJSRuntime JS
+
+<PageTitle>ER Diagram – SchemaDoc</PageTitle>
+
+@if (State.CurrentSchema is null)
+{
+    <div class="flex items-center justify-center h-full text-center p-8">
+        <div>
+            <div class="text-6xl mb-4">📊</div>
+            <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">No Schema Loaded</h1>
+            <p class="text-gray-500 dark:text-gray-400 mb-6">Connect to a database first to view the ER diagram.</p>
+            <a href="/connections"
+               class="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 no-underline transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                Add Connection
+            </a>
+        </div>
+    </div>
+}
+else
+{
+    <div class="flex flex-col h-full">
+        <!-- Filter panel -->
+        <div class="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6 py-4">
+            <div class="flex items-center justify-between mb-3">
+                <h1 class="text-lg font-bold text-gray-800 dark:text-gray-100">ER Diagram</h1>
+                <div class="flex items-center gap-2">
+                    <!-- Zoom controls -->
+                    <div class="flex items-center gap-1 border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
+                        <button class="text-xs px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors font-mono"
+                                @onclick="ZoomOut" title="Zoom out">−</button>
+                        <span class="text-xs px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 min-w-[3rem] text-center select-none">@($"{(int)(zoom * 100)}%")</span>
+                        <button class="text-xs px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors font-mono"
+                                @onclick="ZoomIn" title="Zoom in">+</button>
+                        <button class="text-xs px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors border-l border-gray-200 dark:border-gray-600"
+                                @onclick="ResetZoom" title="Reset zoom">↺</button>
+                    </div>
+                    <button class="text-xs bg-blue-50 dark:bg-gray-700 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-gray-600 px-3 py-1.5 rounded-lg hover:bg-blue-100 dark:hover:bg-gray-600 transition-colors"
+                            @onclick="SelectAll">
+                        Select All
+                    </button>
+                    <button class="text-xs bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                            @onclick="DeselectAll">
+                        Deselect All
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap gap-2">
+                @foreach (var table in allTables)
+                {
+                    var tableName = table.Name;
+                    var isSelected = selectedTables.Contains(tableName);
+                    <label class="@($"inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors select-none {(isSelected ? "bg-blue-50 dark:bg-gray-700 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700" : "bg-gray-50 dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600")}")">
+                        <input type="checkbox"
+                               checked="@isSelected"
+                               class="w-3.5 h-3.5 rounded accent-blue-600"
+                               @onchange="() => ToggleTable(tableName)" />
+                        @tableName
+                    </label>
+                }
+            </div>
+        </div>
+
+        <!-- Diagram container -->
+        <div class="flex-1 overflow-auto p-6 bg-gray-50 dark:bg-gray-900" id="diagram-scroll-area">
+            @if (!selectedTables.Any())
+            {
+                <div class="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
+                    Select at least one table to display the diagram.
+                </div>
+            }
+            else
+            {
+                <div style="transform: scale(@zoom.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)); transform-origin: top center; transition: transform 0.15s ease;">
+                    <div id="mermaid-container" class="flex justify-center"></div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private List<SchemaTable> allTables = [];
+    private HashSet<string> selectedTables = new(StringComparer.OrdinalIgnoreCase);
+    private string lastRenderedDefinition = "";
+    private double zoom = 1.0;
+
+    protected override void OnInitialized()
+    {
+        if (State.CurrentSchema is not null)
+        {
+            allTables = State.CurrentSchema.Tables.OrderBy(t => t.Name).ToList();
+            selectedTables = new HashSet<string>(allTables.Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (State.CurrentSchema is null || !selectedTables.Any())
+            return;
+
+        var definition = MermaidGenerator.Generate(State.CurrentSchema, selectedTables);
+
+        if (definition != lastRenderedDefinition)
+        {
+            lastRenderedDefinition = definition;
+            await JS.InvokeVoidAsync("renderMermaid", "mermaid-container", definition);
+        }
+    }
+
+    private void ToggleTable(string tableName)
+    {
+        if (!selectedTables.Remove(tableName))
+            selectedTables.Add(tableName);
+
+        lastRenderedDefinition = "";
+    }
+
+    private void SelectAll()
+    {
+        selectedTables = new HashSet<string>(allTables.Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
+        lastRenderedDefinition = "";
+    }
+
+    private void DeselectAll()
+    {
+        selectedTables.Clear();
+        lastRenderedDefinition = "";
+    }
+
+    private void ZoomIn()  => zoom = Math.Min(zoom + 0.25, 3.0);
+    private void ZoomOut() => zoom = Math.Max(zoom - 0.25, 0.25);
+    private void ResetZoom() => zoom = 1.0;
+}

@@ -1,0 +1,355 @@
+@page "/annotations"
+@layout SchemaDoc.Web.Components.Layout.MainLayout
+@inject SchemaDoc.Web.Services.SchemaSessionState SessionState
+@inject IAnnotationRepository AnnotationRepo
+@inject IJSRuntime JS
+
+<PageTitle>Annotations - SchemaDoc</PageTitle>
+
+<div class="p-8 max-w-4xl mx-auto">
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Annotations</h1>
+
+    @if (SessionState.CurrentSchema is null || SessionState.ActiveConnection is null)
+    {
+        <div class="text-center py-16 text-gray-400">
+            <div class="text-5xl mb-4">&#128278;</div>
+            <p class="text-lg mb-2">No schema loaded</p>
+            <p class="text-sm">Connect to a database first from the
+                <a href="/connections" class="text-blue-500 hover:underline">Connections</a> page.
+            </p>
+        </div>
+    }
+    else
+    {
+        @* Success / Error messages *@
+        @if (successMessage is not null)
+        {
+            <div class="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 mb-4 flex items-center justify-between">
+                <span>@successMessage</span>
+                <button class="text-green-500 hover:text-green-700" @onclick="() => successMessage = null">&times;</button>
+            </div>
+        }
+
+        @if (errorMessage is not null)
+        {
+            <div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4 flex items-center justify-between">
+                <span>@errorMessage</span>
+                <button class="text-red-500 hover:text-red-700" @onclick="() => errorMessage = null">&times;</button>
+            </div>
+        }
+
+        @* Export / Import actions *@
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Export / Import</h2>
+            <div class="flex flex-wrap gap-3">
+                <button class="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        @onclick="ExportAsync"
+                        disabled="@exporting">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    @if (exporting)
+                    {
+                        <span>Exporting...</span>
+                    }
+                    else
+                    {
+                        <span>Export Annotations (JSON)</span>
+                    }
+                </button>
+
+                <label class="flex items-center gap-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-pointer @(importing ? "opacity-50 cursor-not-allowed" : "")">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    @if (importing)
+                    {
+                        <span>Importing...</span>
+                    }
+                    else
+                    {
+                        <span>Import Annotations (JSON)</span>
+                    }
+                    <InputFile OnChange="ImportAsync" accept=".json" class="hidden" disabled="@importing" />
+                </label>
+            </div>
+        </div>
+
+        @* Annotated tables listing *@
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6">
+            <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">
+                Annotated Tables
+                @if (annotations is not null)
+                {
+                    <span class="text-sm font-normal text-gray-400 ml-2">(@annotations.Count)</span>
+                }
+            </h2>
+
+            @if (loading)
+            {
+                <div class="text-center py-8 text-gray-400 text-sm">Loading annotations...</div>
+            }
+            else if (annotations is null || annotations.Count == 0)
+            {
+                <div class="text-center py-8 text-gray-400 text-sm">
+                    No annotations found for this database. Add descriptions to tables and columns on the table detail pages.
+                </div>
+            }
+            else
+            {
+                <div class="divide-y divide-gray-100">
+                    @foreach (var table in annotations)
+                    {
+                        <div class="py-3 first:pt-0 last:pb-0">
+                            <div class="flex items-start justify-between">
+                                <div>
+                                    <a href="@($"/table/{Uri.EscapeDataString(table.SchemaName)}/{Uri.EscapeDataString(table.TableName)}")"
+                                       class="text-sm font-medium text-blue-600 hover:underline">
+                                        @table.SchemaName.@table.TableName
+                                    </a>
+                                    @if (!string.IsNullOrWhiteSpace(table.Description))
+                                    {
+                                        <p class="text-sm text-gray-500 mt-0.5">@table.Description</p>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(table.Tags))
+                                {
+                                    <div class="flex gap-1 flex-shrink-0 ml-3">
+                                        @foreach (var tag in table.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                        {
+                                            <span class="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">@tag</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                            @if (table.ColumnAnnotations.Any(c => !string.IsNullOrWhiteSpace(c.Description)))
+                            {
+                                <div class="mt-2 ml-4 text-xs text-gray-400">
+                                    @table.ColumnAnnotations.Count(c => !string.IsNullOrWhiteSpace(c.Description)) column(s) annotated
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<TableAnnotationDto>? annotations;
+    private bool loading = true;
+    private bool exporting;
+    private bool importing;
+    private string? successMessage;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAnnotationsAsync();
+    }
+
+    private async Task LoadAnnotationsAsync()
+    {
+        if (SessionState.ActiveConnection is null || SessionState.CurrentSchema is null)
+        {
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        try
+        {
+            annotations = await AnnotationRepo.GetAllForConnectionAsync(
+                SessionState.ActiveConnection.Name,
+                SessionState.CurrentSchema.DatabaseName);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to load annotations: {ex.Message}";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task ExportAsync()
+    {
+        if (SessionState.ActiveConnection is null || SessionState.CurrentSchema is null)
+            return;
+
+        exporting = true;
+        errorMessage = null;
+        successMessage = null;
+
+        try
+        {
+            var allAnnotations = await AnnotationRepo.GetAllForConnectionAsync(
+                SessionState.ActiveConnection.Name,
+                SessionState.CurrentSchema.DatabaseName);
+
+            var export = new AnnotationExportModel
+            {
+                ConnectionName = SessionState.ActiveConnection.Name,
+                DatabaseName = SessionState.CurrentSchema.DatabaseName,
+                ExportedAt = DateTime.UtcNow,
+                Tables = allAnnotations.Select(a => new AnnotationExportTable
+                {
+                    Schema = a.SchemaName,
+                    Table = a.TableName,
+                    Description = a.Description,
+                    Tags = a.Tags,
+                    Columns = a.ColumnAnnotations
+                        .Where(c => !string.IsNullOrWhiteSpace(c.Description))
+                        .Select(c => new AnnotationExportColumn
+                        {
+                            Name = c.ColumnName,
+                            Description = c.Description
+                        }).ToList()
+                }).ToList()
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(export, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            });
+
+            var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+            var fileName = $"{SessionState.CurrentSchema.DatabaseName}_annotations_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "application/json", bytes);
+
+            successMessage = $"Exported {allAnnotations.Count} table annotation(s).";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Export failed: {ex.Message}";
+        }
+        finally
+        {
+            exporting = false;
+        }
+    }
+
+    private async Task ImportAsync(InputFileChangeEventArgs e)
+    {
+        if (SessionState.ActiveConnection is null || SessionState.CurrentSchema is null)
+            return;
+
+        importing = true;
+        errorMessage = null;
+        successMessage = null;
+
+        try
+        {
+            var file = e.File;
+            if (file is null)
+                return;
+
+            if (!file.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                errorMessage = "Please select a .json file.";
+                return;
+            }
+
+            // Limit to 10 MB
+            const long maxSize = 10 * 1024 * 1024;
+            using var stream = file.OpenReadStream(maxSize);
+            using var reader = new System.IO.StreamReader(stream);
+            var json = await reader.ReadToEndAsync();
+
+            var import = System.Text.Json.JsonSerializer.Deserialize<AnnotationExportModel>(json,
+                new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                    PropertyNameCaseInsensitive = true
+                });
+
+            if (import is null || import.Tables is null)
+            {
+                errorMessage = "Invalid JSON format: could not parse annotation data.";
+                return;
+            }
+
+            int tableCount = 0;
+            int columnCount = 0;
+
+            foreach (var table in import.Tables)
+            {
+                var dto = new TableAnnotationDto(
+                    ConnectionName: SessionState.ActiveConnection.Name,
+                    DatabaseName: SessionState.CurrentSchema.DatabaseName,
+                    SchemaName: table.Schema ?? "",
+                    TableName: table.Table ?? "",
+                    Description: table.Description,
+                    Tags: table.Tags,
+                    ColumnAnnotations: (table.Columns ?? new List<AnnotationExportColumn>())
+                        .Select(c => new ColumnAnnotationDto(c.Name ?? "", c.Description))
+                        .ToList()
+                );
+
+                await AnnotationRepo.UpsertTableAnnotationAsync(dto);
+                tableCount++;
+
+                if (table.Columns is not null)
+                {
+                    foreach (var col in table.Columns)
+                    {
+                        await AnnotationRepo.UpsertColumnAnnotationAsync(
+                            SessionState.ActiveConnection.Name,
+                            SessionState.CurrentSchema.DatabaseName,
+                            table.Schema ?? "",
+                            table.Table ?? "",
+                            col.Name ?? "",
+                            col.Description);
+                        columnCount++;
+                    }
+                }
+            }
+
+            successMessage = $"Imported {tableCount} table(s) and {columnCount} column annotation(s).";
+            await LoadAnnotationsAsync();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            errorMessage = "Invalid JSON file. Please check the file format and try again.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Import failed: {ex.Message}";
+        }
+        finally
+        {
+            importing = false;
+        }
+    }
+
+    // --- Export/Import JSON models ---
+
+    private class AnnotationExportModel
+    {
+        public string? ConnectionName { get; set; }
+        public string? DatabaseName { get; set; }
+        public DateTime ExportedAt { get; set; }
+        public List<AnnotationExportTable> Tables { get; set; } = new();
+    }
+
+    private class AnnotationExportTable
+    {
+        public string? Schema { get; set; }
+        public string? Table { get; set; }
+        public string? Description { get; set; }
+        public string? Tags { get; set; }
+        public List<AnnotationExportColumn> Columns { get; set; } = new();
+    }
+
+    private class AnnotationExportColumn
+    {
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+    }
+}

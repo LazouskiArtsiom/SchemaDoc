@@ -1,0 +1,235 @@
+@inject SchemaDoc.Web.Services.SchemaSessionState State
+@inject NavigationManager Nav
+@inject IConnectionRepository ConnectionRepo
+@inject SchemaDoc.Web.Services.SchemaLoaderService SchemaLoader
+@implements IDisposable
+
+<div class="p-3">
+    @if (State.CurrentSchema is null)
+    {
+        <div class="text-xs text-gray-400 dark:text-gray-500 px-2 py-4 text-center">
+            No connection active.<br />
+            <a href="/connections" class="text-blue-500 hover:underline">Add a connection</a>
+        </div>
+    }
+    else
+    {
+        <!-- Search box -->
+        <div class="mb-3">
+            <input type="text"
+                   placeholder="Search..."
+                   class="w-full px-3 py-1.5 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300 dark:focus:ring-blue-600"
+                   @bind="searchText"
+                   @bind:event="oninput" />
+        </div>
+
+        <!-- Connection switcher -->
+        <div class="mb-2 space-y-1">
+            @foreach (var conn in allConnections)
+            {
+                var isActive = State.ActiveConnection?.Id == conn.Id;
+                var isSwitching = switchingId == conn.Id;
+                <button @onclick="() => SwitchToAsync(conn)"
+                        disabled="@isSwitching"
+                        class="w-full flex items-center justify-between gap-1 px-2 py-1 rounded text-xs font-medium transition-colors @(isActive ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300" : failedId == conn.Id ? "text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700")">
+                    <span class="truncate">@conn.Name</span>
+                    @if (isActive)
+                    {
+                        <button @onclick:stopPropagation="true" @onclick="Disconnect"
+                                title="Disconnect"
+                                class="flex-shrink-0 text-blue-400 dark:text-blue-500 hover:text-red-500 dark:hover:text-red-400 transition-colors p-0.5 rounded">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    }
+                    else if (isSwitching)
+                    {
+                        <svg class="w-3 h-3 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                        </svg>
+                    }
+                    else if (failedId == conn.Id)
+                    {
+                        <svg class="w-3 h-3 flex-shrink-0 text-red-400 dark:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="@failedMessage">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 3a9 9 0 100 18A9 9 0 0012 3z" />
+                        </svg>
+                    }
+                    else
+                    {
+                        <svg class="w-3 h-3 flex-shrink-0 opacity-0 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        </svg>
+                    }
+                </button>
+            }
+        </div>
+
+        <!-- Tables section -->
+        @if (FilteredTables.Any())
+        {
+            <SidebarSection Title="Tables" Icon="table" Count="@FilteredTables.Count()">
+                @foreach (var table in FilteredTables)
+                {
+                    <SidebarItem Label="@table.Name"
+                                 SubLabel="@table.Schema"
+                                 RowCount="@table.RowCount"
+                                 Href="@($"/table/{Uri.EscapeDataString(table.Schema)}/{Uri.EscapeDataString(table.Name)}")" />
+                }
+            </SidebarSection>
+        }
+
+        <!-- Views section -->
+        @if (FilteredViews.Any())
+        {
+            <SidebarSection Title="Views" Icon="view" Count="@FilteredViews.Count()">
+                @foreach (var view in FilteredViews)
+                {
+                    <SidebarItem Label="@view.Name" SubLabel="@view.Schema" Href="#" />
+                }
+            </SidebarSection>
+        }
+
+        <!-- Stored Procs section -->
+        @if (FilteredProcs.Any())
+        {
+            <SidebarSection Title="Procedures" Icon="proc" Count="@FilteredProcs.Count()">
+                @foreach (var proc in FilteredProcs)
+                {
+                    <SidebarItem Label="@proc.Name" SubLabel="@proc.Schema" Href="#" />
+                }
+            </SidebarSection>
+        }
+
+        <!-- Quick links -->
+        <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-0.5">
+            <a href="/diagram"
+               class="flex items-center gap-2 px-3 py-2 text-sm text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg no-underline font-medium">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" />
+                </svg>
+                ER Diagram
+            </a>
+            <a href="/export"
+               class="flex items-center gap-2 px-3 py-2 text-sm text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg no-underline font-medium">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export PDF
+            </a>
+            <a href="/annotations"
+               class="flex items-center gap-2 px-3 py-2 text-sm text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg no-underline font-medium">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+                Annotations
+            </a>
+            <a href="/diff"
+               class="flex items-center gap-2 px-3 py-2 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg no-underline font-medium">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                </svg>
+                Schema Diff
+            </a>
+        </div>
+    }
+</div>
+
+@code {
+    private string searchText = "";
+    private List<ConnectionProfile> allConnections = [];
+    private int? switchingId;
+    private int? failedId;
+    private string? failedMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.OnChanged += OnStateChanged;
+        allConnections = (await ConnectionRepo.GetAllAsync()).ToList();
+    }
+
+    private async Task SwitchToAsync(ConnectionProfile conn)
+    {
+        if (State.ActiveConnection?.Id == conn.Id)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        // Clear previous error on this connection when retrying
+        if (failedId == conn.Id)
+        {
+            failedId = null;
+            failedMessage = null;
+        }
+
+        var cached = State.GetCachedSchema(conn.Id);
+        if (cached is not null)
+        {
+            State.SetActiveConnection(conn, cached);
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        switchingId = conn.Id;
+        StateHasChanged();
+        try
+        {
+            var schema = await SchemaLoader.LoadSchemaAsync(conn.Id, conn.Provider, forceRefresh: false);
+            State.SetActiveConnection(conn, schema);
+            await ConnectionRepo.TouchLastConnectedAsync(conn.Id, schema.DatabaseName);
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            failedId = conn.Id;
+            failedMessage = ex.Message;
+        }
+        finally
+        {
+            switchingId = null;
+            StateHasChanged();
+        }
+    }
+
+    private IEnumerable<SchemaTable> FilteredTables =>
+        State.CurrentSchema?.Tables
+            .Where(t => string.IsNullOrWhiteSpace(searchText) ||
+                        t.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                        t.Schema.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+        ?? Enumerable.Empty<SchemaTable>();
+
+    private IEnumerable<SchemaView> FilteredViews =>
+        State.CurrentSchema?.Views
+            .Where(v => string.IsNullOrWhiteSpace(searchText) ||
+                        v.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+        ?? Enumerable.Empty<SchemaView>();
+
+    private IEnumerable<StoredProcedure> FilteredProcs =>
+        State.CurrentSchema?.StoredProcedures
+            .Where(p => string.IsNullOrWhiteSpace(searchText) ||
+                        p.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+        ?? Enumerable.Empty<StoredProcedure>();
+
+    private void OnStateChanged() => InvokeAsync(async () =>
+    {
+        allConnections = (await ConnectionRepo.GetAllAsync()).ToList();
+        StateHasChanged();
+    });
+
+    private void Disconnect()
+    {
+        State.Clear();
+        Nav.NavigateTo("/");
+    }
+
+    public void Dispose()
+    {
+        State.OnChanged -= OnStateChanged;
+    }
+}

@@ -1,0 +1,22 @@
+@inject NavigationManager Nav
+
+<a href="@Href"
+   class="flex flex-col px-3 py-1.5 rounded-lg text-sm no-underline transition-colors
+          @(IsActive ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium" : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50")">
+    <span class="truncate">@Label</span>
+    @if (!string.IsNullOrEmpty(SubLabel))
+    {
+        <span class="text-xs @(IsActive ? "text-blue-400 dark:text-blue-400" : "text-gray-400 dark:text-gray-500") truncate">
+            @SubLabel@(RowCount.HasValue ? $" · ~{RowCount.Value:N0} rows" : "")
+        </span>
+    }
+</a>
+
+@code {
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string? SubLabel { get; set; }
+    [Parameter] public string Href { get; set; } = "#";
+    [Parameter] public long? RowCount { get; set; }
+
+    private bool IsActive => Nav.Uri.EndsWith(Href, StringComparison.OrdinalIgnoreCase);
+}

@@ -1,0 +1,88 @@
+@inherits LayoutComponentBase
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-100 overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-64 flex-shrink-0 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+        <!-- Logo + theme toggle -->
+        <div class="px-4 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold text-lg no-underline">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                </svg>
+                SchemaDoc
+            </a>
+            <button @onclick="ToggleTheme"
+                    class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    title="Toggle dark mode">
+                @if (isDark)
+                {
+                    <!-- Sun icon -->
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                }
+                else
+                {
+                    <!-- Moon icon -->
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                    </svg>
+                }
+            </button>
+        </div>
+
+        <!-- Sidebar tree -->
+        <div class="flex-1 overflow-y-auto">
+            <Sidebar />
+        </div>
+
+        <!-- Bottom nav -->
+        <div class="border-t border-gray-200 dark:border-gray-700 p-3 space-y-1">
+            <a href="/connections"
+               class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 no-underline transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                Connections
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet
+     class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg z-50">
+    An unhandled error has occurred.
+    <a href="." class="underline ml-2">Reload</a>
+</div>
+
+@code {
+    private bool isDark;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            isDark = await JS.InvokeAsync<bool>("themeInterop.init");
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        isDark = await JS.InvokeAsync<bool>("themeInterop.toggle");
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}

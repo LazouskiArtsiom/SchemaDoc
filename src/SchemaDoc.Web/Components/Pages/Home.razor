@@ -1,0 +1,148 @@
+@page "/"
+@layout SchemaDoc.Web.Components.Layout.MainLayout
+@inject SchemaDoc.Web.Services.SchemaSessionState State
+@inject SchemaDoc.Web.Services.SchemaLoaderService SchemaLoader
+@inject IConnectionRepository ConnectionRepo
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>SchemaDoc</PageTitle>
+
+<div class="flex items-center justify-center h-full text-center p-8">
+    @if (State.CurrentSchema is null)
+    {
+        <div>
+            <div class="text-6xl mb-4">🗄️</div>
+            <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">Welcome to SchemaDoc</h1>
+            <p class="text-gray-500 dark:text-gray-400 mb-6">Connect to a database to start exploring and documenting your schema.</p>
+            <a href="/connections"
+               class="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 no-underline transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                Add Connection
+            </a>
+        </div>
+    }
+    else
+    {
+        <div class="max-w-xl">
+            <div class="text-5xl mb-4">✅</div>
+            <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100 mb-1">@State.CurrentSchema.DatabaseName</h1>
+            <p class="text-gray-500 dark:text-gray-400 mb-2">
+                @State.CurrentSchema.Tables.Count tables &bull;
+                @State.CurrentSchema.Views.Count views &bull;
+                @State.CurrentSchema.StoredProcedures.Count procedures &bull;
+                @State.CurrentSchema.ForeignKeys.Count relationships
+            </p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mb-6">
+                Extracted @State.CurrentSchema.ExtractedAt.ToLocalTime().ToString("g")
+            </p>
+
+            @if (refreshError is not null)
+            {
+                <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm rounded-lg px-4 py-3 mb-4">
+                    @refreshError
+                </div>
+            }
+
+            <!-- Quick actions -->
+            <div class="flex flex-wrap gap-3 justify-center mb-6">
+                <a href="/diagram"
+                   class="inline-flex items-center gap-2 bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-100 dark:hover:bg-gray-600 no-underline transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" />
+                    </svg>
+                    ER Diagram
+                </a>
+                <a href="/export"
+                   class="inline-flex items-center gap-2 bg-green-50 dark:bg-gray-700 text-green-700 dark:text-green-400 border border-green-200 dark:border-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-100 dark:hover:bg-gray-600 no-underline transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Export PDF
+                </a>
+                <button class="inline-flex items-center gap-2 bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                        @onclick="RefreshSchemaAsync" disabled="@refreshing">
+                    <svg class="w-4 h-4 @(refreshing ? "animate-spin" : "")" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    @(refreshing ? "Refreshing..." : "Refresh Schema")
+                </button>
+                <a href="/connections"
+                   class="inline-flex items-center gap-2 bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-600 no-underline transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    Switch Connection
+                </a>
+            </div>
+
+            <!-- Table overview -->
+            <div class="text-left bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+                <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">Schemas</h3>
+                <div class="flex flex-wrap gap-2">
+                    @foreach (var schema in State.CurrentSchema.Tables.Select(t => t.Schema).Distinct().OrderBy(s => s))
+                    {
+                        var count = State.CurrentSchema.Tables.Count(t => t.Schema == schema);
+                        <span class="bg-blue-50 dark:bg-gray-700 text-blue-700 dark:text-blue-300 text-xs px-2.5 py-1 rounded-full font-medium">
+                            @schema <span class="text-blue-400 dark:text-blue-400">(@count)</span>
+                        </span>
+                    }
+                </div>
+            </div>
+
+            <p class="mt-6 text-sm text-gray-400 dark:text-gray-500">Select a table from the sidebar to start exploring.</p>
+        </div>
+    }
+</div>
+
+@code {
+    private bool refreshing;
+    private string? refreshError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.OnChanged += OnStateChanged;
+
+        // If no active connection but saved connections exist, go straight to the connections list
+        if (State.CurrentSchema is null)
+        {
+            var any = (await ConnectionRepo.GetAllAsync()).Any();
+            if (any)
+                Nav.NavigateTo("/connections");
+        }
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task RefreshSchemaAsync()
+    {
+        if (State.ActiveConnection is null) return;
+        refreshing = true;
+        refreshError = null;
+        try
+        {
+            var schema = await SchemaLoader.LoadSchemaAsync(
+                State.ActiveConnection.Id, State.ActiveConnection.Provider, forceRefresh: true);
+            State.SetActiveConnection(State.ActiveConnection, schema);
+        }
+        catch (Exception ex)
+        {
+            refreshError = $"Refresh failed: {ex.Message}";
+        }
+        finally
+        {
+            refreshing = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        State.OnChanged -= OnStateChanged;
+    }
+}

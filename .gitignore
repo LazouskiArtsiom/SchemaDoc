@@ -1,0 +1,31 @@
+# .NET build outputs
+bin/
+obj/
+publish/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.ntvs*
+*.njsproj
+*.sln.docstates
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local SQLite database — user-specific connection data, never commit
+*.db
+*.db-shm
+*.db-wal
+
+# EF Core migrations snapshot (optional — keep if you want migration history)
+# src/SchemaDoc.Infrastructure/Migrations/
+
+# .NET publish single-file temp
+*.blob

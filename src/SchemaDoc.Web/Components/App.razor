@@ -1,0 +1,70 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <!-- JetBrains Mono font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+          colors: {
+            // Deep navy blue-gray scale
+            gray: {
+              50:  '#f0f4fc',  // sidebar light: off-white blueish
+              100: '#e2eaf6',  // main bg light: clearly not white
+              200: '#c8d4e8',  // borders light
+              300: '#9aaec8',
+              400: '#6a88a8',  // muted text (bright enough in dark mode)
+              500: '#4a6080',
+              600: '#2e4a6a',
+              700: '#1a3050',  // strong text
+              800: '#0c1a30',  // sidebar dark bg
+              900: '#060e1e',  // main dark bg — true near-black navy
+            },
+            // Indigo accent
+            blue: {
+              50:  '#eef2ff',
+              100: '#e0e7ff',
+              200: '#c7d2fe',
+              300: '#a5b4fc',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              800: '#3730a3',
+              900: '#312e81',
+            }
+          }
+        }
+      }
+    }
+    </script>
+    <!-- Mermaid.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes @rendermode="InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+    <script src="js/theme.js"></script>
+    <script src="js/mermaid-interop.js"></script>
+    <script src="js/file-download.js"></script>
+</body>
+
+</html>
