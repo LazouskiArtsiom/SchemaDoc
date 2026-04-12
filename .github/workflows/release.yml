@@ -47,8 +47,11 @@ jobs:
           body: |
             ## SchemaDoc ${{ github.ref_name }}
 
-            ### Download
-            Extract the zip and run `SchemaDoc.Web.exe`. Your browser will open automatically.
+            ### Download & Run
+            1. Download the zip below
+            2. Extract all files to any folder
+            3. Run `SchemaDoc.Web.exe` — your browser opens automatically at `http://localhost:5000`
+            4. Open `landing.html` in a browser for the product overview page
 
             ### Supported databases
             - SQL Server
@@ -58,7 +61,7 @@ jobs:
 
             ### Requirements
             - Windows x64
-            - No .NET installation needed (self-contained)
+            - No .NET installation needed (fully self-contained)
           files: SchemaDoc-${{ github.ref_name }}-win-x64.zip
           draft: false
           prerelease: false
