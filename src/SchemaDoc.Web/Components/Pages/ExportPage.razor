@@ -67,23 +67,30 @@
             </div>
         }
 
-        <button class="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                @onclick="DownloadPdfAsync"
-                disabled="@generating">
-            @if (generating)
-            {
-                <span>Generating PDF...</span>
-            }
-            else
-            {
-                <span>Download PDF</span>
-            }
-        </button>
+        <div class="flex flex-wrap gap-3">
+            <button class="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    @onclick="DownloadPdfAsync" disabled="@generating">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                @(generating ? "Generating..." : "Download PDF")
+            </button>
+            <button class="flex items-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    @onclick="DownloadHtmlAsync" disabled="@generatingHtml">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                @(generatingHtml ? "Generating..." : "Download HTML")
+            </button>
+            <button class="flex items-center gap-2 bg-purple-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    @onclick="DownloadDrawioAsync" disabled="@generatingDrawio">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/></svg>
+                @(generatingDrawio ? "Generating..." : "Download Draw.io")
+            </button>
+        </div>
     }
 </div>
 
 @code {
     private bool generating;
+    private bool generatingHtml;
+    private bool generatingDrawio;
     private string? errorMessage;
 
     private async Task DownloadPdfAsync()
@@ -114,5 +121,37 @@
         {
             generating = false;
         }
+    }
+
+    private async Task DownloadHtmlAsync()
+    {
+        if (SessionState.CurrentSchema is null || SessionState.ActiveConnection is null) return;
+        generatingHtml = true;
+        errorMessage = null;
+        try
+        {
+            var annotations = await AnnotationRepo.GetAllForConnectionAsync(
+                SessionState.ActiveConnection.Name, SessionState.CurrentSchema.DatabaseName);
+            var bytes = SchemaDoc.Export.HtmlExporter.GenerateHtml(SessionState.CurrentSchema, annotations);
+            var fileName = $"{SessionState.CurrentSchema.DatabaseName}_schema_{DateTime.Now:yyyyMMdd_HHmmss}.html";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "text/html", bytes);
+        }
+        catch (Exception ex) { errorMessage = $"Failed to generate HTML: {ex.Message}"; }
+        finally { generatingHtml = false; }
+    }
+
+    private async Task DownloadDrawioAsync()
+    {
+        if (SessionState.CurrentSchema is null) return;
+        generatingDrawio = true;
+        errorMessage = null;
+        try
+        {
+            var bytes = SchemaDoc.Export.DrawioExporter.Generate(SessionState.CurrentSchema);
+            var fileName = $"{SessionState.CurrentSchema.DatabaseName}_schema.drawio";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "application/xml", bytes);
+        }
+        catch (Exception ex) { errorMessage = $"Failed to generate Draw.io file: {ex.Message}"; }
+        finally { generatingDrawio = false; }
     }
 }

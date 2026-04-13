@@ -40,6 +40,10 @@
                 <div>
                     <div class="flex items-center gap-2">
                         <span class="font-medium text-gray-800 dark:text-gray-100">@conn.Name</span>
+                        @if (!string.IsNullOrEmpty(conn.Tag))
+                        {
+                            <span class="@TagColorClass(conn.TagColor) text-xs px-2 py-0.5 rounded-full font-semibold">@conn.Tag</span>
+                        }
                         @if (isActive)
                         {
                             <span class="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">Active</span>
@@ -199,6 +203,31 @@
                     </div>
                 }
 
+                <!-- Environment Tag (optional) -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Environment Tag <span class="text-gray-400 font-normal">(optional)</span></label>
+                    <div class="flex items-center gap-2 mb-2">
+                        @foreach (var preset in new[] { "Dev", "Staging", "Prod", "QA" })
+                        {
+                            <button type="button" @onclick="() => formTag = (formTag == preset ? null : preset)"
+                                    class="text-xs px-2.5 py-1 rounded-full border transition-colors @(formTag == preset ? "bg-blue-100 dark:bg-blue-900/40 border-blue-400 text-blue-700 dark:text-blue-300" : "border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400")">
+                                @preset
+                            </button>
+                        }
+                    </div>
+                    <input type="text" @bind="formTag" @bind:event="oninput" placeholder="Or type custom tag..."
+                           class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                    <div class="flex items-center gap-2 mt-2">
+                        <span class="text-xs text-gray-400 dark:text-gray-500 mr-1">Color:</span>
+                        @foreach (var (name, bg) in tagColorOptions)
+                        {
+                            <button type="button" @onclick="() => formTagColor = name"
+                                    class="w-6 h-6 rounded-full @bg transition-all @(formTagColor == name ? "ring-2 ring-offset-1 ring-blue-500 dark:ring-offset-gray-800 scale-110" : "opacity-70 hover:opacity-100")">
+                            </button>
+                        }
+                    </div>
+                </div>
+
                 @if (errorMessage is not null)
                 {
                     <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm rounded-lg px-3 py-2">
@@ -240,6 +269,29 @@
     private string sqlUsername = "";
     private string sqlPassword = "";
     private bool   sqlTrustCert = true;
+
+    // Tag fields
+    private string? formTag;
+    private string formTagColor = "blue";
+
+    private static readonly (string Name, string Bg)[] tagColorOptions =
+    [
+        ("green",  "bg-green-500"),
+        ("yellow", "bg-yellow-500"),
+        ("red",    "bg-red-500"),
+        ("blue",   "bg-blue-500"),
+        ("purple", "bg-purple-500"),
+    ];
+
+    private static string TagColorClass(string? color) => color switch
+    {
+        "green"  => "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300",
+        "yellow" => "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300",
+        "red"    => "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300",
+        "blue"   => "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300",
+        "purple" => "bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300",
+        _        => "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300",
+    };
 
     private string ConnectionStringPlaceholder => formProvider switch
     {
@@ -287,6 +339,8 @@
         sqlUsername   = "";
         sqlPassword   = "";
         sqlTrustCert  = true;
+        formTag       = null;
+        formTagColor  = "blue";
     }
 
     private async Task SaveAsync()
@@ -311,7 +365,8 @@
                 return;
             }
 
-            var id = await ConnectionRepo.AddAsync(formName, formProvider, cs);
+            var tag = string.IsNullOrWhiteSpace(formTag) ? null : formTag.Trim();
+            var id = await ConnectionRepo.AddAsync(formName, formProvider, cs, tag, tag is not null ? formTagColor : null);
             showForm = false;
             connections = (await ConnectionRepo.GetAllAsync()).ToList();
 

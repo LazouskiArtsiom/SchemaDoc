@@ -61,6 +61,8 @@
     </main>
 </div>
 
+<GlobalSearch @ref="globalSearch" />
+
 <div id="blazor-error-ui" data-nosnippet
      class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg z-50">
     An unhandled error has occurred.
@@ -69,14 +71,25 @@
 
 @code {
     private bool isDark;
+    private GlobalSearch? globalSearch;
+    private DotNetObjectReference<MainLayout>? dotNetRef;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             isDark = await JS.InvokeAsync<bool>("themeInterop.init");
+            dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("globalSearch.init", dotNetRef);
             StateHasChanged();
         }
+    }
+
+    [JSInvokable]
+    public void OnCtrlK()
+    {
+        globalSearch?.Open();
+        _ = JS.InvokeVoidAsync("globalSearch.focusInput", "global-search-input");
     }
 
     private async Task ToggleTheme()
@@ -84,5 +97,9 @@
         isDark = await JS.InvokeAsync<bool>("themeInterop.toggle");
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        dotNetRef?.Dispose();
+        return ValueTask.CompletedTask;
+    }
 }

@@ -1,0 +1,166 @@
+@inject SchemaDoc.Web.Services.SchemaSessionState State
+@inject NavigationManager Nav
+
+@if (isOpen && State.CurrentSchema is not null)
+{
+    <div class="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" @onclick="Close" @onkeydown="HandleKeyDown">
+        <!-- Backdrop -->
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
+
+        <!-- Modal -->
+        <div class="relative w-full max-w-lg bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+             @onclick:stopPropagation="true">
+
+            <!-- Search input -->
+            <div class="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                <input id="global-search-input" type="text"
+                       placeholder="Search tables, columns, views, procedures..."
+                       class="flex-1 bg-transparent text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 outline-none"
+                       @bind="query" @bind:event="oninput" @onkeydown="HandleKeyDown" />
+                <kbd class="text-[10px] text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-600 rounded px-1.5 py-0.5">ESC</kbd>
+            </div>
+
+            <!-- Results -->
+            <div class="max-h-80 overflow-y-auto">
+                @if (string.IsNullOrWhiteSpace(query))
+                {
+                    <div class="px-4 py-6 text-center text-sm text-gray-400 dark:text-gray-500">
+                        Type to search across the entire schema
+                    </div>
+                }
+                else if (!Results.Any())
+                {
+                    <div class="px-4 py-6 text-center text-sm text-gray-400 dark:text-gray-500">
+                        No results for "@query"
+                    </div>
+                }
+                else
+                {
+                    var idx = 0;
+                    foreach (var result in Results)
+                    {
+                        var i = idx;
+                        var r = result;
+                        <button @onclick="() => NavigateToResult(r)"
+                                class="w-full flex items-center gap-3 px-4 py-2 text-left text-sm transition-colors @(i == selectedIndex ? "bg-blue-50 dark:bg-blue-900/30" : "hover:bg-gray-50 dark:hover:bg-gray-700/50")">
+                            <span class="@CategoryColor(r.Category) text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0 min-w-[48px] text-center">
+                                @r.Category
+                            </span>
+                            <span class="font-medium text-gray-800 dark:text-gray-100 truncate">@r.Name</span>
+                            <span class="text-xs text-gray-400 dark:text-gray-500 truncate ml-auto">@r.SubLabel</span>
+                        </button>
+                        idx++;
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isOpen;
+    private string query = "";
+    private int selectedIndex;
+
+    private record SearchResult(string Category, string Name, string SubLabel, string NavigateUrl);
+
+    private IReadOnlyList<SearchResult> Results => ComputeResults();
+
+    public void Open()
+    {
+        isOpen = true;
+        query = "";
+        selectedIndex = 0;
+        StateHasChanged();
+    }
+
+    public void Close()
+    {
+        isOpen = false;
+        StateHasChanged();
+    }
+
+    private IReadOnlyList<SearchResult> ComputeResults()
+    {
+        if (string.IsNullOrWhiteSpace(query) || State.CurrentSchema is null)
+            return [];
+
+        var q = query.Trim();
+        var results = new List<SearchResult>();
+        var schema = State.CurrentSchema;
+
+        // Tables
+        foreach (var t in schema.Tables)
+        {
+            if (t.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || t.Schema.Contains(q, StringComparison.OrdinalIgnoreCase))
+                results.Add(new("Table", t.FullName, $"{t.Columns.Count} columns", $"/table/{Uri.EscapeDataString(t.Schema)}/{Uri.EscapeDataString(t.Name)}"));
+        }
+
+        // Columns
+        foreach (var t in schema.Tables)
+        {
+            foreach (var c in t.Columns)
+            {
+                if (c.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    results.Add(new("Column", c.Name, $"{t.FullName} · {c.DataType}", $"/table/{Uri.EscapeDataString(t.Schema)}/{Uri.EscapeDataString(t.Name)}"));
+            }
+        }
+
+        // Views
+        foreach (var v in schema.Views)
+        {
+            if (v.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
+                results.Add(new("View", v.FullName, $"{v.Columns.Count} columns", "#"));
+        }
+
+        // Stored Procedures
+        foreach (var p in schema.StoredProcedures)
+        {
+            if (p.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
+                results.Add(new("Proc", p.FullName, $"{p.Parameters.Count} params", "#"));
+        }
+
+        return results.Take(50).ToList();
+    }
+
+    private void NavigateToResult(SearchResult result)
+    {
+        isOpen = false;
+        if (result.NavigateUrl != "#")
+            Nav.NavigateTo(result.NavigateUrl);
+    }
+
+    private void HandleKeyDown(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Escape":
+                Close();
+                break;
+            case "ArrowDown":
+                if (Results.Count > 0)
+                    selectedIndex = (selectedIndex + 1) % Results.Count;
+                break;
+            case "ArrowUp":
+                if (Results.Count > 0)
+                    selectedIndex = (selectedIndex - 1 + Results.Count) % Results.Count;
+                break;
+            case "Enter":
+                if (selectedIndex >= 0 && selectedIndex < Results.Count)
+                    NavigateToResult(Results[selectedIndex]);
+                break;
+        }
+    }
+
+    private static string CategoryColor(string category) => category switch
+    {
+        "Table"  => "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300",
+        "Column" => "bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300",
+        "View"   => "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300",
+        "Proc"   => "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300",
+        _        => "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300",
+    };
+}

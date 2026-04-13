@@ -5,7 +5,9 @@ public record ConnectionProfile(
     string Name,
     DatabaseProvider Provider,
     DateTime LastConnectedAt,
-    string? LastDatabaseName
+    string? LastDatabaseName,
+    string? Tag = null,
+    string? TagColor = null
 );
 
 public record TableAnnotationDto(

@@ -10,6 +10,8 @@ public class SavedConnection
     public string EncryptedConnectionString { get; set; } = "";
     public DateTime LastConnectedAt { get; set; }
     public string? LastDatabaseName { get; set; }
+    public string? Tag { get; set; }
+    public string? TagColor { get; set; }
 
     public ICollection<SchemaSnapshot> Snapshots { get; set; } = [];
 }

@@ -12,7 +12,7 @@ public class ConnectionRepository(AppDbContext db) : IConnectionRepository
     {
         return await db.Connections
             .OrderBy(c => c.Name)
-            .Select(c => new ConnectionProfile(c.Id, c.Name, c.Provider, c.LastConnectedAt, c.LastDatabaseName))
+            .Select(c => new ConnectionProfile(c.Id, c.Name, c.Provider, c.LastConnectedAt, c.LastDatabaseName, c.Tag, c.TagColor))
             .ToListAsync();
     }
 
@@ -23,14 +23,16 @@ public class ConnectionRepository(AppDbContext db) : IConnectionRepository
         return ConnectionStringProtector.Unprotect(conn.EncryptedConnectionString);
     }
 
-    public async Task<int> AddAsync(string name, DatabaseProvider provider, string connectionString)
+    public async Task<int> AddAsync(string name, DatabaseProvider provider, string connectionString, string? tag = null, string? tagColor = null)
     {
         var entity = new SavedConnection
         {
             Name = name,
             Provider = provider,
             EncryptedConnectionString = ConnectionStringProtector.Protect(connectionString),
-            LastConnectedAt = DateTime.UtcNow
+            LastConnectedAt = DateTime.UtcNow,
+            Tag = tag,
+            TagColor = tagColor
         };
         db.Connections.Add(entity);
         await db.SaveChangesAsync();
@@ -45,6 +47,17 @@ public class ConnectionRepository(AppDbContext db) : IConnectionRepository
         entity.Provider = provider;
         entity.EncryptedConnectionString = ConnectionStringProtector.Protect(connectionString);
         await db.SaveChangesAsync();
+    }
+
+    public async Task UpdateTagAsync(int id, string? tag, string? tagColor)
+    {
+        var entity = await db.Connections.FindAsync(id);
+        if (entity is not null)
+        {
+            entity.Tag = tag;
+            entity.TagColor = tagColor;
+            await db.SaveChangesAsync();
+        }
     }
 
     public async Task DeleteAsync(int id)
