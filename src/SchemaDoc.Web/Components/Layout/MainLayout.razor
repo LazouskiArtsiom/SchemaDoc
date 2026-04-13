@@ -80,7 +80,11 @@
         {
             isDark = await JS.InvokeAsync<bool>("themeInterop.init");
             dotNetRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("globalSearch.init", dotNetRef);
+            try
+            {
+                await JS.InvokeVoidAsync("globalSearch.init", dotNetRef);
+            }
+            catch { /* Script may not be loaded yet on first render — Ctrl+K will still work once loaded */ }
             StateHasChanged();
         }
     }
