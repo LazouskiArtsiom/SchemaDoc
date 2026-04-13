@@ -87,12 +87,14 @@
             <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">New Connection</h2>
 
             <div class="space-y-4">
+                <!-- Name -->
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
                     <input type="text" @bind="formName" @bind:event="oninput" placeholder="e.g. Production AdventureWorks"
                            class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
                 </div>
 
+                <!-- Database Type -->
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Database Type</label>
                     <select @bind="formProvider"
@@ -104,27 +106,98 @@
                     </select>
                 </div>
 
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Connection String</label>
-                    <textarea @bind="formConnectionString" @bind:event="oninput" rows="3"
-                              placeholder="@ConnectionStringPlaceholder"
-                              class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm font-mono bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300"></textarea>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Stored encrypted on your machine. Never sent anywhere.</p>
-                    @if (formProvider == DatabaseProvider.SqlServer)
+                <!-- SQL Server structured form -->
+                @if (formProvider == DatabaseProvider.SqlServer)
+                {
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Server</label>
+                        <input type="text" @bind="sqlServer" @bind:event="oninput" placeholder="e.g. localhost, myserver.database.windows.net"
+                               class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Database</label>
+                        <input type="text" @bind="sqlDatabase" @bind:event="oninput" placeholder="e.g. MyDatabase"
+                               class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Authentication</label>
+                        <select @bind="sqlAuthMethod"
+                                class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                            <option value="SqlAuth">SQL Server Authentication</option>
+                            <option value="WindowsAuth">Windows Authentication</option>
+                            <option value="AadPassword">Azure AD – Password</option>
+                            <option value="AadServicePrincipal">Azure AD – Service Principal</option>
+                            <option value="AadIntegrated">Azure AD – Integrated</option>
+                            <option value="AadDefault">Azure AD – Default / Managed Identity</option>
+                        </select>
+                    </div>
+
+                    @if (sqlAuthMethod is "SqlAuth" or "AadPassword")
                     {
-                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                            SQL auth: <span class="font-mono">User Id=sa;Password=secret;</span>
-                            &nbsp;·&nbsp;
-                            Windows auth: <span class="font-mono">Integrated Security=True;</span>
-                        </p>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username</label>
+                            <input type="text" @bind="sqlUsername" @bind:event="oninput" placeholder="e.g. sa"
+                                   class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+                            <input type="password" @bind="sqlPassword" @bind:event="oninput"
+                                   class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                        </div>
                     }
-                    @if (formProvider == DatabaseProvider.CosmosDb)
+
+                    @if (sqlAuthMethod == "AadServicePrincipal")
                     {
-                        <p class="text-xs text-blue-500 dark:text-blue-400 mt-1">
-                            Emulator: <span class="font-mono">AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b5KZzAq/3+1/Ue2HbgL9C5E3D0m3A==;</span>
-                        </p>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Client ID</label>
+                            <input type="text" @bind="sqlUsername" @bind:event="oninput" placeholder="Application (client) ID"
+                                   class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Client Secret</label>
+                            <input type="password" @bind="sqlPassword" @bind:event="oninput"
+                                   class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                        </div>
                     }
-                </div>
+
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" id="trustCert" @bind="sqlTrustCert"
+                               class="rounded border-gray-300 dark:border-gray-600 text-blue-600" />
+                        <label for="trustCert" class="text-sm text-gray-700 dark:text-gray-300">Trust Server Certificate</label>
+                        <span class="text-xs text-gray-400 dark:text-gray-500">(required for self-signed / dev certs)</span>
+                    </div>
+
+                    <!-- Generated connection string preview -->
+                    <details class="group">
+                        <summary class="text-xs text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 dark:hover:text-gray-300 select-none">
+                            Show generated connection string
+                        </summary>
+                        <div class="mt-2 font-mono text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-gray-600 dark:text-gray-400 break-all">
+                            @BuildSqlServerConnectionString()
+                        </div>
+                    </details>
+
+                    <p class="text-xs text-gray-400 dark:text-gray-500">Stored encrypted on your machine. Never sent anywhere.</p>
+                }
+                else
+                {
+                    <!-- Other providers: raw connection string -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Connection String</label>
+                        <textarea @bind="formConnectionString" @bind:event="oninput" rows="3"
+                                  placeholder="@ConnectionStringPlaceholder"
+                                  class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm font-mono bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300"></textarea>
+                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Stored encrypted on your machine. Never sent anywhere.</p>
+                        @if (formProvider == DatabaseProvider.CosmosDb)
+                        {
+                            <p class="text-xs text-blue-500 dark:text-blue-400 mt-1">
+                                Emulator: <span class="font-mono">AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b5KZzAq/3+1/Ue2HbgL9C5E3D0m3A==;</span>
+                            </p>
+                        }
+                    </div>
+                }
 
                 @if (errorMessage is not null)
                 {
@@ -160,14 +233,41 @@
     private DatabaseProvider formProvider = DatabaseProvider.SqlServer;
     private string formConnectionString = "";
 
+    // SQL Server structured fields
+    private string sqlServer   = "";
+    private string sqlDatabase = "";
+    private string sqlAuthMethod = "SqlAuth";
+    private string sqlUsername = "";
+    private string sqlPassword = "";
+    private bool   sqlTrustCert = true;
+
     private string ConnectionStringPlaceholder => formProvider switch
     {
-        DatabaseProvider.SqlServer  => "Server=myserver;Database=MyDb;User Id=sa;Password=secret;TrustServerCertificate=True;",
         DatabaseProvider.PostgreSql => "Host=localhost;Port=5432;Database=MyDb;Username=postgres;Password=secret;",
         DatabaseProvider.MySql      => "Server=localhost;Port=3306;Database=MyDb;User=root;Password=secret;",
         DatabaseProvider.CosmosDb   => "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8...;",
         _                           => "Enter connection string..."
     };
+
+    private string BuildSqlServerConnectionString()
+    {
+        var trust = sqlTrustCert ? "TrustServerCertificate=True;" : "";
+        return sqlAuthMethod switch
+        {
+            "SqlAuth"            => $"Server={sqlServer};Database={sqlDatabase};User Id={sqlUsername};Password={sqlPassword};{trust}",
+            "WindowsAuth"        => $"Server={sqlServer};Database={sqlDatabase};Integrated Security=True;{trust}",
+            "AadPassword"        => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Password;User Id={sqlUsername};Password={sqlPassword};{trust}",
+            "AadServicePrincipal"=> $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Service Principal;User Id={sqlUsername};Password={sqlPassword};{trust}",
+            "AadIntegrated"      => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Integrated;{trust}",
+            "AadDefault"         => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Default;{trust}",
+            _                    => ""
+        };
+    }
+
+    private string GetEffectiveConnectionString() =>
+        formProvider == DatabaseProvider.SqlServer
+            ? BuildSqlServerConnectionString()
+            : formConnectionString;
 
     protected override async Task OnInitializedAsync()
     {
@@ -176,18 +276,26 @@
 
     private void ShowAddForm()
     {
-        showForm = true;
-        errorMessage = null;
-        formName = "";
+        showForm      = true;
+        errorMessage  = null;
+        formName      = "";
         formConnectionString = "";
-        formProvider = DatabaseProvider.SqlServer;
+        formProvider  = DatabaseProvider.SqlServer;
+        sqlServer     = "";
+        sqlDatabase   = "";
+        sqlAuthMethod = "SqlAuth";
+        sqlUsername   = "";
+        sqlPassword   = "";
+        sqlTrustCert  = true;
     }
 
     private async Task SaveAsync()
     {
-        if (string.IsNullOrWhiteSpace(formName) || string.IsNullOrWhiteSpace(formConnectionString))
+        var cs = GetEffectiveConnectionString();
+
+        if (string.IsNullOrWhiteSpace(formName) || string.IsNullOrWhiteSpace(cs))
         {
-            errorMessage = "Name and connection string are required.";
+            errorMessage = "Please fill in all required fields.";
             return;
         }
 
@@ -196,14 +304,14 @@
 
         try
         {
-            var ok = await SchemaLoader.TestConnectionAsync(formProvider, formConnectionString);
+            var ok = await SchemaLoader.TestConnectionAsync(formProvider, cs);
             if (!ok)
             {
-                errorMessage = "Could not connect. Please check your connection string.";
+                errorMessage = "Could not connect. Please check your settings.";
                 return;
             }
 
-            var id = await ConnectionRepo.AddAsync(formName, formProvider, formConnectionString);
+            var id = await ConnectionRepo.AddAsync(formName, formProvider, cs);
             showForm = false;
             connections = (await ConnectionRepo.GetAllAsync()).ToList();
 
@@ -222,7 +330,6 @@
 
     private async Task ConnectAsync(ConnectionProfile conn)
     {
-        // If already cached, switch instantly
         var cached = State.GetCachedSchema(conn.Id);
         if (cached is not null)
         {
