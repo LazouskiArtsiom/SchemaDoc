@@ -110,6 +110,14 @@
                               placeholder="@ConnectionStringPlaceholder"
                               class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm font-mono bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300"></textarea>
                     <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Stored encrypted on your machine. Never sent anywhere.</p>
+                    @if (formProvider == DatabaseProvider.SqlServer)
+                    {
+                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                            SQL auth: <span class="font-mono">User Id=sa;Password=secret;</span>
+                            &nbsp;·&nbsp;
+                            Windows auth: <span class="font-mono">Integrated Security=True;</span>
+                        </p>
+                    }
                     @if (formProvider == DatabaseProvider.CosmosDb)
                     {
                         <p class="text-xs text-blue-500 dark:text-blue-400 mt-1">
@@ -154,7 +162,7 @@
 
     private string ConnectionStringPlaceholder => formProvider switch
     {
-        DatabaseProvider.SqlServer  => "Server=.;Database=MyDb;Trusted_Connection=True;TrustServerCertificate=True;",
+        DatabaseProvider.SqlServer  => "Server=myserver;Database=MyDb;User Id=sa;Password=secret;TrustServerCertificate=True;",
         DatabaseProvider.PostgreSql => "Host=localhost;Port=5432;Database=MyDb;Username=postgres;Password=secret;",
         DatabaseProvider.MySql      => "Server=localhost;Port=3306;Database=MyDb;User=root;Password=secret;",
         DatabaseProvider.CosmosDb   => "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8...;",
