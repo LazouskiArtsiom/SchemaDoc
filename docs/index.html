@@ -544,12 +544,178 @@
       color: var(--text-sub);
     }
 
+    /* ── Use case mockups ───────────────────────────────── */
+    .mockups {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin-top: 2.5rem;
+    }
+
+    .mockup {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .mockup:hover { border-color: #2a4060; transform: translateY(-2px); }
+
+    .mockup-header {
+      padding: 0.6rem 1rem;
+      background: #08121e;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .mockup-label {
+      font-size: 0.68rem;
+      color: #818cf8;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .mockup-body {
+      padding: 1.25rem;
+      font-size: 0.78rem;
+      color: var(--text);
+      min-height: 280px;
+    }
+
+    .mockup-caption {
+      padding: 1rem 1.25rem;
+      border-top: 1px solid var(--border);
+      background: #08121e;
+    }
+    .mockup-caption h4 {
+      font-size: 0.9rem;
+      color: var(--text);
+      margin-bottom: 0.25rem;
+      font-weight: 600;
+    }
+    .mockup-caption p {
+      font-size: 0.75rem;
+      color: var(--text-sub);
+      line-height: 1.5;
+    }
+
+    /* Diff mockup badges */
+    .diff-badges {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .diff-badge {
+      font-size: 0.68rem;
+      padding: 0.15rem 0.6rem;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .badge-added    { background: rgba(74,222,128,0.15); color: #4ade80; }
+    .badge-removed  { background: rgba(248,113,113,0.15); color: #f87171; }
+    .badge-modified { background: rgba(251,191,36,0.15); color: #fbbf24; }
+
+    .diff-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.3rem 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+    }
+    .diff-sign { font-weight: 700; width: 12px; flex-shrink: 0; }
+    .diff-sign.add { color: #4ade80; }
+    .diff-sign.rem { color: #f87171; }
+    .diff-sign.mod { color: #fbbf24; }
+    .diff-col { color: var(--text); }
+    .diff-note { color: var(--text-sub); font-size: 0.68rem; margin-left: auto; }
+
+    /* Search mockup */
+    .search-box {
+      border: 1px solid #2a4060;
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      background: #0a1628;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 0.75rem;
+    }
+    .search-box input { background: transparent; border: none; color: var(--text); outline: none; flex: 1; font-family: inherit; font-size: 0.8rem; }
+    .kbd-hint { font-size: 0.64rem; border: 1px solid var(--border); padding: 0.1rem 0.35rem; border-radius: 4px; color: var(--text-sub); }
+    .search-result {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.45rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      margin-bottom: 0.2rem;
+    }
+    .search-result.active { background: rgba(79,70,229,0.15); }
+    .search-type {
+      font-size: 0.58rem;
+      padding: 0.08rem 0.4rem;
+      border-radius: 3px;
+      font-weight: 700;
+      min-width: 40px;
+      text-align: center;
+    }
+    .type-table  { background: rgba(79,70,229,0.25); color: #a5b4fc; }
+    .type-column { background: rgba(192,132,252,0.25); color: #c4b5fd; }
+    .type-view   { background: rgba(74,222,128,0.25); color: #86efac; }
+    .search-sub { color: var(--text-sub); font-size: 0.64rem; margin-left: auto; }
+
+    /* Export mockup */
+    .export-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.6rem 0.85rem;
+      border-radius: 6px;
+      margin-bottom: 0.5rem;
+      border: 1px solid var(--border);
+      font-size: 0.78rem;
+    }
+    .export-btn.pdf      { background: rgba(79,70,229,0.1); color: #a5b4fc; border-color: rgba(79,70,229,0.3); }
+    .export-btn.html     { background: rgba(74,222,128,0.1); color: #86efac; border-color: rgba(74,222,128,0.3); }
+    .export-btn.drawio   { background: rgba(192,132,252,0.1); color: #c4b5fd; border-color: rgba(192,132,252,0.3); }
+    .export-icon { font-size: 1rem; }
+    .export-info { font-size: 0.64rem; color: var(--text-sub); margin-left: auto; }
+
+    /* Tags mockup */
+    .tag-conn {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.7rem;
+      border-radius: 6px;
+      margin-bottom: 0.3rem;
+      font-size: 0.78rem;
+    }
+    .tag-conn.active { background: rgba(79,70,229,0.15); }
+    .env-tag {
+      font-size: 0.6rem;
+      padding: 0.08rem 0.45rem;
+      border-radius: 999px;
+      font-weight: 700;
+    }
+    .env-dev     { background: rgba(74,222,128,0.2); color: #4ade80; }
+    .env-staging { background: rgba(251,191,36,0.2); color: #fbbf24; }
+    .env-prod    { background: rgba(248,113,113,0.2); color: #f87171; }
+    .env-qa      { background: rgba(192,132,252,0.2); color: #c084fc; }
+
     /* ── Responsive ──────────────────────────────────────── */
     @media (max-width: 640px) {
       .preview-body { flex-direction: column; height: auto; }
       .preview-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); height: 160px; overflow: hidden; }
       .nav-links .hide-mobile { display: none; }
       footer { flex-direction: column; text-align: center; }
+      .mockups { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -566,6 +732,7 @@
   </div>
   <div class="nav-links">
     <a href="#features" class="hide-mobile">Features</a>
+    <a href="#use-cases" class="hide-mobile">Use cases</a>
     <a href="#databases" class="hide-mobile">Databases</a>
     <a href="#how-it-works" class="hide-mobile">How it works</a>
     <a href="https://github.com/LazouskiArtsiom/SchemaDoc/releases/latest/download/SchemaDoc-win-x64.zip" class="btn btn-primary">
@@ -690,6 +857,184 @@
       <h3>Private &amp; Secure</h3>
       <p>Connection strings encrypted with Windows DPAPI, stored locally. Nothing is ever sent to any server. Dark &amp; light mode included.</p>
     </div>
+  </div>
+</section>
+
+<!-- ── Use Cases ──────────────────────────────────────────────── -->
+<section id="use-cases" style="padding-top:0">
+  <div class="section-label">Use cases</div>
+  <h2 class="section-title">See it in action</h2>
+  <p class="section-sub">
+    Real workflows for developers and data engineers managing schemas across environments.
+  </p>
+
+  <div class="mockups">
+
+    <!-- Mockup 1: Cross-Database Diff -->
+    <div class="mockup">
+      <div class="mockup-header">
+        <div class="preview-dot dot-red"></div>
+        <div class="preview-dot dot-yellow"></div>
+        <div class="preview-dot dot-green"></div>
+        <div class="mockup-label" style="margin-left:0.4rem">Schema Diff</div>
+      </div>
+      <div class="mockup-body">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;font-size:0.7rem;color:var(--text-sub)">
+          <span class="env-tag env-prod">Prod</span>
+          <span style="color:var(--text)">→</span>
+          <span class="env-tag env-dev">Dev</span>
+        </div>
+        <div class="diff-badges">
+          <span class="diff-badge badge-added">+2 tables added</span>
+          <span class="diff-badge badge-modified">~3 tables modified</span>
+        </div>
+        <div class="diff-row">
+          <span class="diff-sign add">+</span>
+          <span class="diff-col">app.TaskComments</span>
+          <span class="diff-note">5 columns</span>
+        </div>
+        <div class="diff-row">
+          <span class="diff-sign add">+</span>
+          <span class="diff-col">app.AuditLog</span>
+          <span class="diff-note">7 columns</span>
+        </div>
+        <div class="diff-row">
+          <span class="diff-sign mod">~</span>
+          <span class="diff-col">app.Users</span>
+          <span class="diff-note">+AvatarUrl, +Bio</span>
+        </div>
+        <div class="diff-row">
+          <span class="diff-sign mod">~</span>
+          <span class="diff-col">app.Tasks</span>
+          <span class="diff-note">+DueDate, +Tags</span>
+        </div>
+        <div class="diff-row">
+          <span class="diff-sign mod">~</span>
+          <span class="diff-col">app.Projects</span>
+          <span class="diff-note">+IsArchived</span>
+        </div>
+      </div>
+      <div class="mockup-caption">
+        <h4>Cross-Database Comparison</h4>
+        <p>Compare Dev vs Prod instantly. See which tables and columns are out of sync between environments before deployment.</p>
+      </div>
+    </div>
+
+    <!-- Mockup 2: Global Search -->
+    <div class="mockup">
+      <div class="mockup-header">
+        <div class="preview-dot dot-red"></div>
+        <div class="preview-dot dot-yellow"></div>
+        <div class="preview-dot dot-green"></div>
+        <div class="mockup-label" style="margin-left:0.4rem">Global Search · Ctrl+K</div>
+      </div>
+      <div class="mockup-body">
+        <div class="search-box">
+          <svg width="14" height="14" fill="none" stroke="#6a88a8" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+          <span style="color:var(--text);flex:1">user_id</span>
+          <span class="kbd-hint">ESC</span>
+        </div>
+        <div class="search-result active">
+          <span class="search-type type-column">COL</span>
+          <span style="color:var(--text)">user_id</span>
+          <span class="search-sub">app.Orders · int</span>
+        </div>
+        <div class="search-result">
+          <span class="search-type type-column">COL</span>
+          <span style="color:var(--text)">user_id</span>
+          <span class="search-sub">app.Sessions · int</span>
+        </div>
+        <div class="search-result">
+          <span class="search-type type-table">TBL</span>
+          <span style="color:var(--text)">app.UserRoles</span>
+          <span class="search-sub">4 columns</span>
+        </div>
+        <div class="search-result">
+          <span class="search-type type-view">VIEW</span>
+          <span style="color:var(--text)">ActiveUsers</span>
+          <span class="search-sub">8 columns</span>
+        </div>
+      </div>
+      <div class="mockup-caption">
+        <h4>Instant Schema Search</h4>
+        <p>Find any table, column, view, or procedure across your database in milliseconds. No more scrolling through dozens of tables.</p>
+      </div>
+    </div>
+
+    <!-- Mockup 3: Multi-Format Export -->
+    <div class="mockup">
+      <div class="mockup-header">
+        <div class="preview-dot dot-red"></div>
+        <div class="preview-dot dot-yellow"></div>
+        <div class="preview-dot dot-green"></div>
+        <div class="mockup-label" style="margin-left:0.4rem">Export Documentation</div>
+      </div>
+      <div class="mockup-body">
+        <div style="font-size:0.72rem;color:var(--text-sub);margin-bottom:0.75rem">BookstoreDB · 11 tables · 12 foreign keys</div>
+        <div class="export-btn pdf">
+          <span class="export-icon">📄</span>
+          <span>Download PDF</span>
+          <span class="export-info">Print-ready docs</span>
+        </div>
+        <div class="export-btn html">
+          <span class="export-icon">🌐</span>
+          <span>Download HTML</span>
+          <span class="export-info">Self-contained</span>
+        </div>
+        <div class="export-btn drawio">
+          <span class="export-icon">⬡</span>
+          <span>Download Draw.io</span>
+          <span class="export-info">Team-editable</span>
+        </div>
+        <div style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--border);font-size:0.68rem;color:var(--text-muted)">
+          Includes: TOC · column grids · FK relations · annotations
+        </div>
+      </div>
+      <div class="mockup-caption">
+        <h4>Export in Any Format</h4>
+        <p>Share schema docs with your team. PDF for formal review, HTML for the wiki, Draw.io for collaborative diagramming.</p>
+      </div>
+    </div>
+
+    <!-- Mockup 4: Connection Tags -->
+    <div class="mockup">
+      <div class="mockup-header">
+        <div class="preview-dot dot-red"></div>
+        <div class="preview-dot dot-yellow"></div>
+        <div class="preview-dot dot-green"></div>
+        <div class="mockup-label" style="margin-left:0.4rem">Environment Tags</div>
+      </div>
+      <div class="mockup-body">
+        <div style="font-size:0.68rem;color:var(--text-muted);letter-spacing:0.08em;margin-bottom:0.75rem;font-weight:600">CONNECTIONS · 5</div>
+        <div class="tag-conn active">
+          <span class="env-tag env-dev">Dev</span>
+          <span>SchemaDoc_Dev</span>
+        </div>
+        <div class="tag-conn">
+          <span class="env-tag env-staging">Staging</span>
+          <span>SchemaDoc_Staging</span>
+        </div>
+        <div class="tag-conn">
+          <span class="env-tag env-prod">Prod</span>
+          <span>SchemaDoc_Prod</span>
+        </div>
+        <div class="tag-conn">
+          <span class="env-tag env-qa">QA</span>
+          <span>SchemaDoc_QA</span>
+        </div>
+        <div class="tag-conn">
+          <span style="color:var(--text-sub)">—</span>
+          <span style="color:var(--text-sub)">cosmos-lazouski-test</span>
+        </div>
+      </div>
+      <div class="mockup-caption">
+        <h4>Never Mix Up Environments</h4>
+        <p>Color-coded tags for Dev, Staging, Prod, QA. One glance tells you which environment you're connected to.</p>
+      </div>
+    </div>
+
   </div>
 </section>
 
