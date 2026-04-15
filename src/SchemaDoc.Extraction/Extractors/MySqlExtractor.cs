@@ -34,10 +34,18 @@ public class MySqlExtractor : ISchemaExtractor
         var procs = (await conn.QueryAsync<RawProc>(ProcsQuery)).ToList();
         var procParams = (await conn.QueryAsync<RawProcParam>(ProcParamsQuery)).ToList();
 
-        var tables = BuildTables(columns, fks);
+        // Step 1 enhanced diff data
+        var primaryKeys = (await conn.QueryAsync<RawPkColumn>(PrimaryKeysQuery)).ToList();
+        var uniqueConstraints = (await conn.QueryAsync<RawUniqueColumn>(UniqueConstraintsQuery)).ToList();
+        var checkConstraints = (await conn.QueryAsync<RawCheck>(CheckConstraintsQuery)).ToList();
+        var indexes = (await conn.QueryAsync<RawIndexColumn>(IndexesQuery)).ToList();
+        var triggers = (await conn.QueryAsync<RawTrigger>(TriggersQuery)).ToList();
+
+        var tables = BuildTables(columns, fks, primaryKeys, uniqueConstraints, checkConstraints, indexes);
         var schemaViews = BuildViews(views);
         var storedProcs = BuildProcs(procs, procParams);
         var foreignKeys = BuildForeignKeys(fks);
+        var triggerList = BuildTriggers(triggers);
 
         return new DatabaseSchema(
             DatabaseName: dbName,
@@ -46,43 +54,111 @@ public class MySqlExtractor : ISchemaExtractor
             Tables: tables,
             Views: schemaViews,
             StoredProcedures: storedProcs,
-            ForeignKeys: foreignKeys
+            ForeignKeys: foreignKeys,
+            Triggers: triggerList
         );
     }
 
     // ── Build helpers ────────────────────────────────────────────────────────
 
-    private static List<SchemaTable> BuildTables(List<RawColumn> columns, List<RawForeignKey> fks)
+    private static List<SchemaTable> BuildTables(
+        List<RawColumn> columns,
+        List<RawForeignKey> fks,
+        List<RawPkColumn> primaryKeys,
+        List<RawUniqueColumn> uniqueConstraints,
+        List<RawCheck> checkConstraints,
+        List<RawIndexColumn> indexes)
     {
         var fkSet = fks
             .Select(f => (f.ParentSchema, f.ParentTable, f.ParentColumn))
             .ToHashSet();
 
+        var pksByTable = primaryKeys
+            .GroupBy(p => (p.SchemaName, p.TableName))
+            .ToDictionary(g => g.Key, g => new PrimaryKeyInfo(
+                Name: g.First().ConstraintName,
+                Columns: g.OrderBy(c => c.KeyOrdinal).Select(c => c.ColumnName).ToList(),
+                IndexType: "BTREE"));
+
+        var uqByTable = uniqueConstraints
+            .GroupBy(u => (u.SchemaName, u.TableName))
+            .ToDictionary(g => g.Key, g => g
+                .GroupBy(u => u.ConstraintName)
+                .Select(cg => new UniqueConstraint(
+                    Name: cg.Key,
+                    Columns: cg.OrderBy(c => c.KeyOrdinal).Select(c => c.ColumnName).ToList()))
+                .ToList());
+
+        var checksByTable = checkConstraints
+            .GroupBy(c => (c.SchemaName, c.TableName))
+            .ToDictionary(g => g.Key, g => g
+                .Select(c => new CheckConstraint(c.ConstraintName, c.Expression))
+                .ToList());
+
+        var indexesByTable = indexes
+            .Where(i => !i.IsPrimaryKey && !i.IsUniqueConstraint)
+            .GroupBy(i => (i.SchemaName, i.TableName))
+            .ToDictionary(g => g.Key, g => g
+                .GroupBy(i => i.IndexName)
+                .Select(ig =>
+                {
+                    var ordered = ig.OrderBy(c => c.KeyOrdinal).ToList();
+                    return new SchemaIndex(
+                        Name: ig.Key,
+                        Columns: ordered.Select(c => new IndexColumn(c.ColumnName, c.IsDescending)).ToList(),
+                        IncludedColumns: null,
+                        IsUnique: ig.First().IsUnique,
+                        IndexType: ig.First().IndexType,
+                        FilterExpression: null);
+                })
+                .ToList());
+
         return columns
             .GroupBy(c => (c.SchemaName, c.TableName))
-            .Select(g => new SchemaTable(
-                Schema: g.Key.SchemaName,
-                Name: g.Key.TableName,
-                RowCount: null,
-                Columns: g.OrderBy(c => c.OrdinalPosition).Select(c => new SchemaColumn(
-                    Name: c.ColumnName,
-                    OrdinalPosition: c.OrdinalPosition,
-                    DataType: c.DataType,
-                    MaxLength: c.CharacterMaximumLength > 0 ? c.CharacterMaximumLength.ToString() : null,
-                    NumericPrecision: c.NumericPrecision > 0 ? c.NumericPrecision : null,
-                    NumericScale: c.NumericScale >= 0 ? c.NumericScale : null,
-                    IsNullable: c.IsNullable,
-                    IsPrimaryKey: c.IsPrimaryKey,
-                    IsForeignKey: fkSet.Contains((c.SchemaName, c.TableName, c.ColumnName)),
-                    IsIdentity: c.IsIdentity,
-                    IsComputed: c.IsComputed,
-                    DefaultValue: c.ColumnDefault,
-                    DbNativeComment: c.ColumnComment
-                )).ToList()
-            ))
+            .Select(g =>
+            {
+                var key = (g.Key.SchemaName, g.Key.TableName);
+                return new SchemaTable(
+                    Schema: g.Key.SchemaName,
+                    Name: g.Key.TableName,
+                    RowCount: null,
+                    Columns: g.OrderBy(c => c.OrdinalPosition).Select(c => new SchemaColumn(
+                        Name: c.ColumnName,
+                        OrdinalPosition: c.OrdinalPosition,
+                        DataType: c.DataType,
+                        MaxLength: c.CharacterMaximumLength > 0 ? c.CharacterMaximumLength.ToString() : null,
+                        NumericPrecision: c.NumericPrecision > 0 ? c.NumericPrecision : null,
+                        NumericScale: c.NumericScale >= 0 ? c.NumericScale : null,
+                        IsNullable: c.IsNullable,
+                        IsPrimaryKey: c.IsPrimaryKey,
+                        IsForeignKey: fkSet.Contains((c.SchemaName, c.TableName, c.ColumnName)),
+                        IsIdentity: c.IsIdentity,
+                        IsComputed: c.IsComputed,
+                        DefaultValue: c.ColumnDefault,
+                        DbNativeComment: c.ColumnComment
+                    )).ToList(),
+                    PrimaryKey: pksByTable.TryGetValue(key, out var pk) ? pk : null,
+                    UniqueConstraints: uqByTable.TryGetValue(key, out var uqs) ? uqs : null,
+                    CheckConstraints: checksByTable.TryGetValue(key, out var cks) ? cks : null,
+                    Indexes: indexesByTable.TryGetValue(key, out var ixs) ? ixs : null
+                );
+            })
             .OrderBy(t => t.Schema).ThenBy(t => t.Name)
             .ToList();
     }
+
+    private static List<SchemaTrigger> BuildTriggers(List<RawTrigger> triggers) =>
+        triggers.Select(t => new SchemaTrigger(
+            Schema: t.TriggerSchema,
+            Name: t.TriggerName,
+            TableSchema: t.TableSchema,
+            TableName: t.TableName,
+            Event: t.EventType,
+            Timing: t.Timing,
+            Definition: t.Definition
+        ))
+        .OrderBy(t => t.TableSchema).ThenBy(t => t.TableName).ThenBy(t => t.Name)
+        .ToList();
 
     private static List<SchemaView> BuildViews(List<RawView> views)
     {
@@ -214,6 +290,57 @@ public class MySqlExtractor : ISchemaExtractor
         public string ParameterMode { get; set; } = "";
     }
 
+    private class RawPkColumn
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string ConstraintName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public int KeyOrdinal { get; set; }
+    }
+
+    private class RawUniqueColumn
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string ConstraintName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public int KeyOrdinal { get; set; }
+    }
+
+    private class RawCheck
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string ConstraintName { get; set; } = "";
+        public string Expression { get; set; } = "";
+    }
+
+    private class RawIndexColumn
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string IndexName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public int KeyOrdinal { get; set; }
+        public bool IsDescending { get; set; }
+        public bool IsUnique { get; set; }
+        public bool IsPrimaryKey { get; set; }
+        public bool IsUniqueConstraint { get; set; }
+        public string? IndexType { get; set; }
+    }
+
+    private class RawTrigger
+    {
+        public string TriggerSchema { get; set; } = "";
+        public string TriggerName { get; set; } = "";
+        public string TableSchema { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string EventType { get; set; } = "";
+        public string Timing { get; set; } = "";
+        public string? Definition { get; set; }
+    }
+
     // ── Queries ───────────────────────────────────────────────────────────────
 
     private const string ColumnsQuery = """
@@ -307,5 +434,85 @@ public class MySqlExtractor : ISchemaExtractor
           AND r.ROUTINE_TYPE IN ('PROCEDURE', 'FUNCTION')
           AND p.ORDINAL_POSITION > 0
         ORDER BY r.ROUTINE_SCHEMA, r.ROUTINE_NAME, p.ORDINAL_POSITION
+        """;
+
+    private const string PrimaryKeysQuery = """
+        SELECT
+            s.TABLE_SCHEMA                              AS SchemaName,
+            s.TABLE_NAME                                AS TableName,
+            s.INDEX_NAME                                AS ConstraintName,
+            s.COLUMN_NAME                               AS ColumnName,
+            s.SEQ_IN_INDEX                              AS KeyOrdinal
+        FROM INFORMATION_SCHEMA.STATISTICS s
+        WHERE s.TABLE_SCHEMA = DATABASE()
+          AND s.INDEX_NAME = 'PRIMARY'
+        ORDER BY s.TABLE_SCHEMA, s.TABLE_NAME, s.SEQ_IN_INDEX
+        """;
+
+    private const string UniqueConstraintsQuery = """
+        SELECT
+            s.TABLE_SCHEMA                              AS SchemaName,
+            s.TABLE_NAME                                AS TableName,
+            s.INDEX_NAME                                AS ConstraintName,
+            s.COLUMN_NAME                               AS ColumnName,
+            s.SEQ_IN_INDEX                              AS KeyOrdinal
+        FROM INFORMATION_SCHEMA.STATISTICS s
+        WHERE s.TABLE_SCHEMA = DATABASE()
+          AND s.NON_UNIQUE = 0
+          AND s.INDEX_NAME <> 'PRIMARY'
+          AND EXISTS (
+              SELECT 1 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+              WHERE tc.TABLE_SCHEMA = s.TABLE_SCHEMA
+                AND tc.TABLE_NAME = s.TABLE_NAME
+                AND tc.CONSTRAINT_NAME = s.INDEX_NAME
+                AND tc.CONSTRAINT_TYPE = 'UNIQUE'
+          )
+        ORDER BY s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME, s.SEQ_IN_INDEX
+        """;
+
+    private const string CheckConstraintsQuery = """
+        SELECT
+            tc.TABLE_SCHEMA                             AS SchemaName,
+            tc.TABLE_NAME                               AS TableName,
+            cc.CONSTRAINT_NAME                          AS ConstraintName,
+            cc.CHECK_CLAUSE                             AS Expression
+        FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc
+        JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+            ON tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+            AND tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
+            AND tc.CONSTRAINT_TYPE = 'CHECK'
+        WHERE tc.TABLE_SCHEMA = DATABASE()
+        ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, cc.CONSTRAINT_NAME
+        """;
+
+    private const string IndexesQuery = """
+        SELECT
+            s.TABLE_SCHEMA                              AS SchemaName,
+            s.TABLE_NAME                                AS TableName,
+            s.INDEX_NAME                                AS IndexName,
+            s.COLUMN_NAME                               AS ColumnName,
+            s.SEQ_IN_INDEX                              AS KeyOrdinal,
+            CASE WHEN s.COLLATION = 'D' THEN 1 ELSE 0 END AS IsDescending,
+            CASE WHEN s.NON_UNIQUE = 0 THEN 1 ELSE 0 END AS IsUnique,
+            CASE WHEN s.INDEX_NAME = 'PRIMARY' THEN 1 ELSE 0 END AS IsPrimaryKey,
+            CASE WHEN s.NON_UNIQUE = 0 AND s.INDEX_NAME <> 'PRIMARY' THEN 1 ELSE 0 END AS IsUniqueConstraint,
+            s.INDEX_TYPE                                AS IndexType
+        FROM INFORMATION_SCHEMA.STATISTICS s
+        WHERE s.TABLE_SCHEMA = DATABASE()
+        ORDER BY s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME, s.SEQ_IN_INDEX
+        """;
+
+    private const string TriggersQuery = """
+        SELECT
+            t.TRIGGER_SCHEMA                            AS TriggerSchema,
+            t.TRIGGER_NAME                              AS TriggerName,
+            t.EVENT_OBJECT_SCHEMA                       AS TableSchema,
+            t.EVENT_OBJECT_TABLE                        AS TableName,
+            t.EVENT_MANIPULATION                        AS EventType,
+            t.ACTION_TIMING                             AS Timing,
+            t.ACTION_STATEMENT                          AS Definition
+        FROM INFORMATION_SCHEMA.TRIGGERS t
+        WHERE t.TRIGGER_SCHEMA = DATABASE()
+        ORDER BY t.EVENT_OBJECT_SCHEMA, t.EVENT_OBJECT_TABLE, t.TRIGGER_NAME
         """;
 }

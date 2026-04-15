@@ -33,11 +33,37 @@ public class SchemaDiffService
                 modifiedTables.Add(diff);
         }
 
-        return new SchemaDiffResult(addedTables, removedTables, modifiedTables.OrderBy(t => t.FullName).ToList());
+        // Triggers are a database-level concept, diff them separately
+        var baselineTriggers = (baseline.Triggers ?? []).ToDictionary(t => t.FullName, t => t);
+        var currentTriggers = (current.Triggers ?? []).ToDictionary(t => t.FullName, t => t);
+
+        var addedTriggers = currentTriggers.Values
+            .Where(t => !baselineTriggers.ContainsKey(t.FullName))
+            .OrderBy(t => t.FullName).ToList();
+        var removedTriggers = baselineTriggers.Values
+            .Where(t => !currentTriggers.ContainsKey(t.FullName))
+            .OrderBy(t => t.FullName).ToList();
+        var modifiedTriggers = new List<TriggerDiff>();
+        foreach (var key in baselineTriggers.Keys.Where(k => currentTriggers.ContainsKey(k)))
+        {
+            var changes = DiffTrigger(baselineTriggers[key], currentTriggers[key]);
+            if (changes.Count > 0)
+                modifiedTriggers.Add(new TriggerDiff(key, changes));
+        }
+
+        return new SchemaDiffResult(
+            addedTables,
+            removedTables,
+            modifiedTables.OrderBy(t => t.FullName).ToList(),
+            addedTriggers,
+            removedTriggers,
+            modifiedTriggers.OrderBy(t => t.FullName).ToList()
+        );
     }
 
     private static TableDiff DiffTable(SchemaTable baseline, SchemaTable current)
     {
+        // ── Column diffs ──────────────────────────────────────────
         var baselineCols = baseline.Columns.ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
         var currentCols  = current.Columns.ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
 
@@ -59,7 +85,38 @@ public class SchemaDiffService
                 modifiedCols.Add(new ColumnDiff(name, changes));
         }
 
-        return new TableDiff(baseline.Schema, baseline.Name, addedCols, removedCols, modifiedCols);
+        // ── Primary Key ──────────────────────────────────────────
+        var pkChanges = DiffPrimaryKey(baseline.PrimaryKey, current.PrimaryKey);
+
+        // ── Unique Constraints ──────────────────────────────────────
+        var (addedUq, removedUq, modifiedUq) = DiffUniqueConstraints(
+            baseline.UniqueConstraints, current.UniqueConstraints);
+
+        // ── Check Constraints ──────────────────────────────────────
+        var (addedCk, removedCk, modifiedCk) = DiffCheckConstraints(
+            baseline.CheckConstraints, current.CheckConstraints);
+
+        // ── Indexes ──────────────────────────────────────
+        var (addedIx, removedIx, modifiedIx) = DiffIndexes(
+            baseline.Indexes, current.Indexes);
+
+        return new TableDiff(
+            baseline.Schema,
+            baseline.Name,
+            addedCols,
+            removedCols,
+            modifiedCols,
+            PrimaryKeyChanges: pkChanges.Count > 0 ? pkChanges : null,
+            AddedUniqueConstraints: addedUq.Count > 0 ? addedUq : null,
+            RemovedUniqueConstraints: removedUq.Count > 0 ? removedUq : null,
+            ModifiedUniqueConstraints: modifiedUq.Count > 0 ? modifiedUq : null,
+            AddedCheckConstraints: addedCk.Count > 0 ? addedCk : null,
+            RemovedCheckConstraints: removedCk.Count > 0 ? removedCk : null,
+            ModifiedCheckConstraints: modifiedCk.Count > 0 ? modifiedCk : null,
+            AddedIndexes: addedIx.Count > 0 ? addedIx : null,
+            RemovedIndexes: removedIx.Count > 0 ? removedIx : null,
+            ModifiedIndexes: modifiedIx.Count > 0 ? modifiedIx : null
+        );
     }
 
     private static List<string> DiffColumn(SchemaColumn baseline, SchemaColumn current)
@@ -81,6 +138,148 @@ public class SchemaDiffService
         if (baseline.IsIdentity != current.IsIdentity)
             changes.Add($"Identity: {baseline.IsIdentity} → {current.IsIdentity}");
 
+        if (!StringsEq(baseline.DefaultValue, current.DefaultValue))
+            changes.Add($"Default: {FormatVal(baseline.DefaultValue)} → {FormatVal(current.DefaultValue)}");
+
+        if (baseline.IsComputed != current.IsComputed)
+            changes.Add($"Computed: {baseline.IsComputed} → {current.IsComputed}");
+
+        if (!StringsEq(baseline.ComputedExpression, current.ComputedExpression))
+            changes.Add($"Computed expression: {FormatVal(baseline.ComputedExpression)} → {FormatVal(current.ComputedExpression)}");
+
         return changes;
     }
+
+    private static List<string> DiffPrimaryKey(PrimaryKeyInfo? baseline, PrimaryKeyInfo? current)
+    {
+        var changes = new List<string>();
+        if (baseline is null && current is null) return changes;
+        if (baseline is null)
+        {
+            changes.Add($"Added: {current!.Name} on ({string.Join(", ", current.Columns)})");
+            return changes;
+        }
+        if (current is null)
+        {
+            changes.Add($"Removed: {baseline.Name} on ({string.Join(", ", baseline.Columns)})");
+            return changes;
+        }
+
+        if (!string.Equals(baseline.Name, current.Name, StringComparison.OrdinalIgnoreCase))
+            changes.Add($"Name: {baseline.Name} → {current.Name}");
+
+        var baseCols = string.Join(", ", baseline.Columns);
+        var currCols = string.Join(", ", current.Columns);
+        if (baseCols != currCols)
+            changes.Add($"Columns: ({baseCols}) → ({currCols})");
+
+        if (!StringsEq(baseline.IndexType, current.IndexType))
+            changes.Add($"Type: {FormatVal(baseline.IndexType)} → {FormatVal(current.IndexType)}");
+
+        return changes;
+    }
+
+    private static (List<UniqueConstraint> Added, List<UniqueConstraint> Removed, List<ConstraintDiff> Modified)
+        DiffUniqueConstraints(IReadOnlyList<UniqueConstraint>? baseline, IReadOnlyList<UniqueConstraint>? current)
+    {
+        var b = (baseline ?? []).ToDictionary(u => u.Name, u => u, StringComparer.OrdinalIgnoreCase);
+        var c = (current ?? []).ToDictionary(u => u.Name, u => u, StringComparer.OrdinalIgnoreCase);
+
+        var added = c.Values.Where(u => !b.ContainsKey(u.Name)).ToList();
+        var removed = b.Values.Where(u => !c.ContainsKey(u.Name)).ToList();
+
+        var modified = new List<ConstraintDiff>();
+        foreach (var name in b.Keys.Where(n => c.ContainsKey(n)))
+        {
+            var baseCols = string.Join(", ", b[name].Columns);
+            var currCols = string.Join(", ", c[name].Columns);
+            if (baseCols != currCols)
+                modified.Add(new ConstraintDiff(name, [$"Columns: ({baseCols}) → ({currCols})"]));
+        }
+        return (added, removed, modified);
+    }
+
+    private static (List<CheckConstraint> Added, List<CheckConstraint> Removed, List<ConstraintDiff> Modified)
+        DiffCheckConstraints(IReadOnlyList<CheckConstraint>? baseline, IReadOnlyList<CheckConstraint>? current)
+    {
+        var b = (baseline ?? []).ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
+        var c = (current ?? []).ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
+
+        var added = c.Values.Where(ck => !b.ContainsKey(ck.Name)).ToList();
+        var removed = b.Values.Where(ck => !c.ContainsKey(ck.Name)).ToList();
+
+        var modified = new List<ConstraintDiff>();
+        foreach (var name in b.Keys.Where(n => c.ContainsKey(n)))
+        {
+            if (!string.Equals(b[name].Expression, c[name].Expression, StringComparison.Ordinal))
+                modified.Add(new ConstraintDiff(name, [$"Expression: {b[name].Expression} → {c[name].Expression}"]));
+        }
+        return (added, removed, modified);
+    }
+
+    private static (List<SchemaIndex> Added, List<SchemaIndex> Removed, List<IndexDiff> Modified)
+        DiffIndexes(IReadOnlyList<SchemaIndex>? baseline, IReadOnlyList<SchemaIndex>? current)
+    {
+        var b = (baseline ?? []).ToDictionary(i => i.Name, i => i, StringComparer.OrdinalIgnoreCase);
+        var c = (current ?? []).ToDictionary(i => i.Name, i => i, StringComparer.OrdinalIgnoreCase);
+
+        var added = c.Values.Where(i => !b.ContainsKey(i.Name)).ToList();
+        var removed = b.Values.Where(i => !c.ContainsKey(i.Name)).ToList();
+
+        var modified = new List<IndexDiff>();
+        foreach (var name in b.Keys.Where(n => c.ContainsKey(n)))
+        {
+            var bi = b[name];
+            var ci = c[name];
+            var changes = new List<string>();
+
+            var baseCols = string.Join(", ", bi.Columns.Select(FormatIndexCol));
+            var currCols = string.Join(", ", ci.Columns.Select(FormatIndexCol));
+            if (baseCols != currCols)
+                changes.Add($"Columns: ({baseCols}) → ({currCols})");
+
+            var baseIncl = bi.IncludedColumns is null ? "" : string.Join(", ", bi.IncludedColumns);
+            var currIncl = ci.IncludedColumns is null ? "" : string.Join(", ", ci.IncludedColumns);
+            if (baseIncl != currIncl)
+                changes.Add($"Included columns: ({baseIncl}) → ({currIncl})");
+
+            if (bi.IsUnique != ci.IsUnique)
+                changes.Add($"Unique: {bi.IsUnique} → {ci.IsUnique}");
+
+            if (!StringsEq(bi.IndexType, ci.IndexType))
+                changes.Add($"Type: {FormatVal(bi.IndexType)} → {FormatVal(ci.IndexType)}");
+
+            if (!StringsEq(bi.FilterExpression, ci.FilterExpression))
+                changes.Add($"Filter: {FormatVal(bi.FilterExpression)} → {FormatVal(ci.FilterExpression)}");
+
+            if (changes.Count > 0)
+                modified.Add(new IndexDiff(name, changes));
+        }
+        return (added, removed, modified);
+    }
+
+    private static List<string> DiffTrigger(SchemaTrigger baseline, SchemaTrigger current)
+    {
+        var changes = new List<string>();
+        if (baseline.TableSchema != current.TableSchema || baseline.TableName != current.TableName)
+            changes.Add($"Table: {baseline.TableSchema}.{baseline.TableName} → {current.TableSchema}.{current.TableName}");
+        if (baseline.Event != current.Event)
+            changes.Add($"Event: {baseline.Event} → {current.Event}");
+        if (baseline.Timing != current.Timing)
+            changes.Add($"Timing: {baseline.Timing} → {current.Timing}");
+        if (!StringsEq(baseline.Definition, current.Definition))
+            changes.Add("Definition changed");
+        return changes;
+    }
+
+    private static string FormatIndexCol(IndexColumn c) => c.IsDescending ? $"{c.Name} DESC" : c.Name;
+
+    private static bool StringsEq(string? a, string? b)
+    {
+        if (a is null && b is null) return true;
+        if (a is null || b is null) return false;
+        return string.Equals(a.Trim(), b.Trim(), StringComparison.Ordinal);
+    }
+
+    private static string FormatVal(string? v) => string.IsNullOrEmpty(v) ? "(none)" : v;
 }

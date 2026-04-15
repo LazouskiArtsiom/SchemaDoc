@@ -173,6 +173,10 @@
                 {
                     <span class="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-3 py-1 rounded-full font-medium">~@diffResult.ModifiedTables.Count table(s) modified</span>
                 }
+                @if ((diffResult.AddedTriggers?.Count ?? 0) + (diffResult.RemovedTriggers?.Count ?? 0) + (diffResult.ModifiedTriggers?.Count ?? 0) > 0)
+                {
+                    <span class="bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-3 py-1 rounded-full font-medium">@((diffResult.AddedTriggers?.Count ?? 0) + (diffResult.RemovedTriggers?.Count ?? 0) + (diffResult.ModifiedTriggers?.Count ?? 0)) trigger(s) changed</span>
+                }
             </div>
 
             @if (diffResult.AddedTables.Count > 0)
@@ -228,32 +232,234 @@
                                     <span class="text-sm font-medium text-gray-800 dark:text-gray-100">@table.FullName</span>
                                     <span class="text-xs text-amber-600 dark:text-amber-400 font-medium">@table.TotalChanges change(s) ▾</span>
                                 </summary>
-                                <div class="px-6 pb-4 pt-1 space-y-1.5">
-                                    @foreach (var col in table.AddedColumns)
+                                <div class="px-6 pb-4 pt-1 space-y-2">
+                                    @* Column changes *@
+                                    @if (table.AddedColumns.Count + table.RemovedColumns.Count + table.ModifiedColumns.Count > 0)
                                     {
-                                        <div class="text-xs text-green-600 dark:text-green-400">
-                                            <span class="font-bold">+</span> <span class="font-medium">@col.Name</span>
-                                            <span class="text-green-500 dark:text-green-500">(@col.DataType)</span> — column added
+                                        <div class="space-y-1">
+                                            <div class="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Columns</div>
+                                            @foreach (var col in table.AddedColumns)
+                                            {
+                                                <div class="text-xs text-green-600 dark:text-green-400">
+                                                    <span class="font-bold">+</span> <span class="font-medium">@col.Name</span>
+                                                    <span class="text-green-500 dark:text-green-500">(@col.DataType)</span> — added
+                                                </div>
+                                            }
+                                            @foreach (var col in table.RemovedColumns)
+                                            {
+                                                <div class="text-xs text-red-600 dark:text-red-400">
+                                                    <span class="font-bold">-</span> <span class="font-medium">@col.Name</span>
+                                                    <span class="text-red-500 dark:text-red-500">(@col.DataType)</span> — removed
+                                                </div>
+                                            }
+                                            @foreach (var colDiff in table.ModifiedColumns)
+                                            {
+                                                foreach (var change in colDiff.Changes)
+                                                {
+                                                    <div class="text-xs text-amber-600 dark:text-amber-400">
+                                                        <span class="font-bold">~</span> <span class="font-medium">@colDiff.ColumnName</span> — @change
+                                                    </div>
+                                                }
+                                            }
                                         </div>
                                     }
-                                    @foreach (var col in table.RemovedColumns)
+
+                                    @* Primary Key changes *@
+                                    @if (table.PrimaryKeyChanges is not null && table.PrimaryKeyChanges.Count > 0)
                                     {
-                                        <div class="text-xs text-red-600 dark:text-red-400">
-                                            <span class="font-bold">-</span> <span class="font-medium">@col.Name</span>
-                                            <span class="text-red-500 dark:text-red-500">(@col.DataType)</span> — column removed
+                                        <div class="space-y-1">
+                                            <div class="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Primary Key</div>
+                                            @foreach (var change in table.PrimaryKeyChanges)
+                                            {
+                                                <div class="text-xs text-amber-600 dark:text-amber-400">
+                                                    <span class="font-bold">~</span> @change
+                                                </div>
+                                            }
                                         </div>
                                     }
-                                    @foreach (var colDiff in table.ModifiedColumns)
+
+                                    @* Indexes *@
+                                    @{
+                                        var hasIdx = (table.AddedIndexes?.Count ?? 0) + (table.RemovedIndexes?.Count ?? 0) + (table.ModifiedIndexes?.Count ?? 0) > 0;
+                                    }
+                                    @if (hasIdx)
                                     {
-                                        foreach (var change in colDiff.Changes)
-                                        {
-                                            <div class="text-xs text-amber-600 dark:text-amber-400">
-                                                <span class="font-bold">~</span> <span class="font-medium">@colDiff.ColumnName</span> — @change
-                                            </div>
-                                        }
+                                        <div class="space-y-1">
+                                            <div class="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Indexes</div>
+                                            @if (table.AddedIndexes is not null)
+                                            {
+                                                foreach (var ix in table.AddedIndexes)
+                                                {
+                                                    <div class="text-xs text-green-600 dark:text-green-400">
+                                                        <span class="font-bold">+</span> <span class="font-medium">@ix.Name</span>
+                                                        <span class="text-green-500 dark:text-green-500">(@(string.Join(", ", ix.Columns.Select(c => c.IsDescending ? c.Name + " DESC" : c.Name))))</span>
+                                                        @if (ix.IsUnique)
+                                                        {
+                                                            <span class="text-[10px] ml-1 px-1 rounded bg-green-100 dark:bg-green-900/40">UNIQUE</span>
+                                                        }
+                                                        @if (!string.IsNullOrEmpty(ix.IndexType))
+                                                        {
+                                                            <span class="text-[10px] ml-1 text-green-500 dark:text-green-500">@ix.IndexType</span>
+                                                        }
+                                                    </div>
+                                                }
+                                            }
+                                            @if (table.RemovedIndexes is not null)
+                                            {
+                                                foreach (var ix in table.RemovedIndexes)
+                                                {
+                                                    <div class="text-xs text-red-600 dark:text-red-400">
+                                                        <span class="font-bold">-</span> <span class="font-medium">@ix.Name</span>
+                                                        <span class="text-red-500 dark:text-red-500">(@(string.Join(", ", ix.Columns.Select(c => c.Name))))</span>
+                                                    </div>
+                                                }
+                                            }
+                                            @if (table.ModifiedIndexes is not null)
+                                            {
+                                                foreach (var ixDiff in table.ModifiedIndexes)
+                                                {
+                                                    foreach (var change in ixDiff.Changes)
+                                                    {
+                                                        <div class="text-xs text-amber-600 dark:text-amber-400">
+                                                            <span class="font-bold">~</span> <span class="font-medium">@ixDiff.Name</span> — @change
+                                                        </div>
+                                                    }
+                                                }
+                                            }
+                                        </div>
+                                    }
+
+                                    @* Unique Constraints *@
+                                    @{
+                                        var hasUq = (table.AddedUniqueConstraints?.Count ?? 0) + (table.RemovedUniqueConstraints?.Count ?? 0) + (table.ModifiedUniqueConstraints?.Count ?? 0) > 0;
+                                    }
+                                    @if (hasUq)
+                                    {
+                                        <div class="space-y-1">
+                                            <div class="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Unique Constraints</div>
+                                            @if (table.AddedUniqueConstraints is not null)
+                                            {
+                                                foreach (var uq in table.AddedUniqueConstraints)
+                                                {
+                                                    <div class="text-xs text-green-600 dark:text-green-400">
+                                                        <span class="font-bold">+</span> <span class="font-medium">@uq.Name</span>
+                                                        <span class="text-green-500 dark:text-green-500">(@(string.Join(", ", uq.Columns)))</span>
+                                                    </div>
+                                                }
+                                            }
+                                            @if (table.RemovedUniqueConstraints is not null)
+                                            {
+                                                foreach (var uq in table.RemovedUniqueConstraints)
+                                                {
+                                                    <div class="text-xs text-red-600 dark:text-red-400">
+                                                        <span class="font-bold">-</span> <span class="font-medium">@uq.Name</span>
+                                                        <span class="text-red-500 dark:text-red-500">(@(string.Join(", ", uq.Columns)))</span>
+                                                    </div>
+                                                }
+                                            }
+                                            @if (table.ModifiedUniqueConstraints is not null)
+                                            {
+                                                foreach (var uqDiff in table.ModifiedUniqueConstraints)
+                                                {
+                                                    foreach (var change in uqDiff.Changes)
+                                                    {
+                                                        <div class="text-xs text-amber-600 dark:text-amber-400">
+                                                            <span class="font-bold">~</span> <span class="font-medium">@uqDiff.Name</span> — @change
+                                                        </div>
+                                                    }
+                                                }
+                                            }
+                                        </div>
+                                    }
+
+                                    @* Check Constraints *@
+                                    @{
+                                        var hasCk = (table.AddedCheckConstraints?.Count ?? 0) + (table.RemovedCheckConstraints?.Count ?? 0) + (table.ModifiedCheckConstraints?.Count ?? 0) > 0;
+                                    }
+                                    @if (hasCk)
+                                    {
+                                        <div class="space-y-1">
+                                            <div class="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Check Constraints</div>
+                                            @if (table.AddedCheckConstraints is not null)
+                                            {
+                                                foreach (var ck in table.AddedCheckConstraints)
+                                                {
+                                                    <div class="text-xs text-green-600 dark:text-green-400">
+                                                        <span class="font-bold">+</span> <span class="font-medium">@ck.Name</span>
+                                                        <span class="text-green-500 dark:text-green-500 font-mono">@ck.Expression</span>
+                                                    </div>
+                                                }
+                                            }
+                                            @if (table.RemovedCheckConstraints is not null)
+                                            {
+                                                foreach (var ck in table.RemovedCheckConstraints)
+                                                {
+                                                    <div class="text-xs text-red-600 dark:text-red-400">
+                                                        <span class="font-bold">-</span> <span class="font-medium">@ck.Name</span>
+                                                    </div>
+                                                }
+                                            }
+                                            @if (table.ModifiedCheckConstraints is not null)
+                                            {
+                                                foreach (var ckDiff in table.ModifiedCheckConstraints)
+                                                {
+                                                    foreach (var change in ckDiff.Changes)
+                                                    {
+                                                        <div class="text-xs text-amber-600 dark:text-amber-400">
+                                                            <span class="font-bold">~</span> <span class="font-medium">@ckDiff.Name</span> — @change
+                                                        </div>
+                                                    }
+                                                }
+                                            }
+                                        </div>
                                     }
                                 </div>
                             </details>
+                        }
+                    </div>
+                </div>
+            }
+
+            @* ── Triggers ──────────────────────────────────────────── *@
+            @if ((diffResult.AddedTriggers?.Count ?? 0) + (diffResult.RemovedTriggers?.Count ?? 0) + (diffResult.ModifiedTriggers?.Count ?? 0) > 0)
+            {
+                <div class="bg-white dark:bg-gray-800 border border-indigo-200 dark:border-indigo-800 rounded-xl mt-4 overflow-hidden">
+                    <div class="bg-indigo-50 dark:bg-indigo-900/30 px-4 py-3 border-b border-indigo-100 dark:border-indigo-800">
+                        <h2 class="text-sm font-semibold text-indigo-700 dark:text-indigo-300">Triggers</h2>
+                        <p class="text-xs text-indigo-600 dark:text-indigo-500 mt-0.5">Database-level trigger differences</p>
+                    </div>
+                    <div class="px-6 py-3 space-y-1.5">
+                        @if (diffResult.AddedTriggers is not null)
+                        {
+                            foreach (var trg in diffResult.AddedTriggers)
+                            {
+                                <div class="text-xs text-green-600 dark:text-green-400">
+                                    <span class="font-bold">+</span> <span class="font-medium">@trg.FullName</span>
+                                    <span class="text-green-500 dark:text-green-500">on @trg.TableSchema.@trg.TableName · @trg.Timing @trg.Event</span>
+                                </div>
+                            }
+                        }
+                        @if (diffResult.RemovedTriggers is not null)
+                        {
+                            foreach (var trg in diffResult.RemovedTriggers)
+                            {
+                                <div class="text-xs text-red-600 dark:text-red-400">
+                                    <span class="font-bold">-</span> <span class="font-medium">@trg.FullName</span>
+                                    <span class="text-red-500 dark:text-red-500">on @trg.TableSchema.@trg.TableName</span>
+                                </div>
+                            }
+                        }
+                        @if (diffResult.ModifiedTriggers is not null)
+                        {
+                            foreach (var trgDiff in diffResult.ModifiedTriggers)
+                            {
+                                foreach (var change in trgDiff.Changes)
+                                {
+                                    <div class="text-xs text-amber-600 dark:text-amber-400">
+                                        <span class="font-bold">~</span> <span class="font-medium">@trgDiff.FullName</span> — @change
+                                    </div>
+                                }
+                            }
                         }
                     </div>
                 </div>

@@ -36,10 +36,18 @@ public class SqlServerExtractor : ISchemaExtractor
         var rowCounts = (await conn.QueryAsync<RawRowCount>(RowCountsQuery))
             .ToDictionary(r => (r.SchemaName, r.TableName), r => r.RowCount);
 
-        var tables = BuildTables(columns, fks, rowCounts);
+        // Step 1 enhanced diff data
+        var primaryKeys = (await conn.QueryAsync<RawPkColumn>(PrimaryKeysQuery)).ToList();
+        var uniqueConstraints = (await conn.QueryAsync<RawUniqueColumn>(UniqueConstraintsQuery)).ToList();
+        var checkConstraints = (await conn.QueryAsync<RawCheck>(CheckConstraintsQuery)).ToList();
+        var indexes = (await conn.QueryAsync<RawIndexColumn>(IndexesQuery)).ToList();
+        var triggers = (await conn.QueryAsync<RawTrigger>(TriggersQuery)).ToList();
+
+        var tables = BuildTables(columns, fks, rowCounts, primaryKeys, uniqueConstraints, checkConstraints, indexes);
         var schemaViews = BuildViews(views);
         var storedProcs = BuildProcs(procs, procParams);
         var foreignKeys = BuildForeignKeys(fks);
+        var triggerList = BuildTriggers(triggers);
 
         return new DatabaseSchema(
             DatabaseName: dbName,
@@ -48,40 +56,105 @@ public class SqlServerExtractor : ISchemaExtractor
             Tables: tables,
             Views: schemaViews,
             StoredProcedures: storedProcs,
-            ForeignKeys: foreignKeys
+            ForeignKeys: foreignKeys,
+            Triggers: triggerList
         );
     }
 
     // ── Build helpers ────────────────────────────────────────────────────────
 
-    private static List<SchemaTable> BuildTables(List<RawColumn> columns, List<RawForeignKey> fks, Dictionary<(string, string), long> rowCounts)
+    private static List<SchemaTable> BuildTables(
+        List<RawColumn> columns,
+        List<RawForeignKey> fks,
+        Dictionary<(string, string), long> rowCounts,
+        List<RawPkColumn> primaryKeys,
+        List<RawUniqueColumn> uniqueConstraints,
+        List<RawCheck> checkConstraints,
+        List<RawIndexColumn> indexes)
     {
         var fkSet = fks
             .Select(f => (f.ParentSchema, f.ParentTable, f.ParentColumn))
             .ToHashSet();
 
+        // Group PK columns by table
+        var pksByTable = primaryKeys
+            .GroupBy(p => (p.SchemaName, p.TableName))
+            .ToDictionary(g => g.Key, g => new PrimaryKeyInfo(
+                Name: g.First().ConstraintName,
+                Columns: g.OrderBy(c => c.KeyOrdinal).Select(c => c.ColumnName).ToList(),
+                IndexType: g.First().IndexType));
+
+        // Group unique constraints by table
+        var uqByTable = uniqueConstraints
+            .GroupBy(u => (u.SchemaName, u.TableName))
+            .ToDictionary(g => g.Key, g => g
+                .GroupBy(u => u.ConstraintName)
+                .Select(cg => new UniqueConstraint(
+                    Name: cg.Key,
+                    Columns: cg.OrderBy(c => c.KeyOrdinal).Select(c => c.ColumnName).ToList()))
+                .ToList());
+
+        // Group check constraints by table
+        var checksByTable = checkConstraints
+            .GroupBy(c => (c.SchemaName, c.TableName))
+            .ToDictionary(g => g.Key, g => g
+                .Select(c => new CheckConstraint(c.ConstraintName, c.Expression))
+                .ToList());
+
+        // Group indexes by table
+        var indexesByTable = indexes
+            .Where(i => !i.IsPrimaryKey && !i.IsUniqueConstraint) // Exclude PK/UQ indexes (they're covered separately)
+            .GroupBy(i => (i.SchemaName, i.TableName))
+            .ToDictionary(g => g.Key, g => g
+                .GroupBy(i => i.IndexName)
+                .Select(ig =>
+                {
+                    var ordered = ig.OrderBy(c => c.KeyOrdinal).ToList();
+                    var keyCols = ordered.Where(c => !c.IsIncluded)
+                        .Select(c => new IndexColumn(c.ColumnName, c.IsDescending)).ToList();
+                    var includedCols = ordered.Where(c => c.IsIncluded)
+                        .Select(c => c.ColumnName).ToList();
+                    return new SchemaIndex(
+                        Name: ig.Key,
+                        Columns: keyCols,
+                        IncludedColumns: includedCols.Count > 0 ? includedCols : null,
+                        IsUnique: ig.First().IsUnique,
+                        IndexType: ig.First().IndexType,
+                        FilterExpression: ig.First().FilterDefinition);
+                })
+                .ToList());
+
         return columns
             .GroupBy(c => (c.SchemaName, c.TableName))
-            .Select(g => new SchemaTable(
-                Schema: g.Key.SchemaName,
-                Name: g.Key.TableName,
-                RowCount: rowCounts.TryGetValue((g.Key.SchemaName, g.Key.TableName), out var rc) ? rc : null,
-                Columns: g.OrderBy(c => c.ColumnId).Select(c => new SchemaColumn(
-                    Name: c.ColumnName,
-                    OrdinalPosition: c.ColumnId,
-                    DataType: c.DataType,
-                    MaxLength: c.MaxLength > 0 && c.MaxLength != -1 ? c.MaxLength.ToString() : (c.MaxLength == -1 ? "MAX" : null),
-                    NumericPrecision: c.NumericPrecision > 0 ? c.NumericPrecision : null,
-                    NumericScale: c.NumericScale >= 0 ? c.NumericScale : null,
-                    IsNullable: c.IsNullable,
-                    IsPrimaryKey: c.IsPrimaryKey,
-                    IsForeignKey: fkSet.Contains((c.SchemaName, c.TableName, c.ColumnName)),
-                    IsIdentity: c.IsIdentity,
-                    IsComputed: c.IsComputed,
-                    DefaultValue: c.DefaultValue,
-                    DbNativeComment: c.MsDescription
-                )).ToList()
-            ))
+            .Select(g =>
+            {
+                var key = (g.Key.SchemaName, g.Key.TableName);
+                return new SchemaTable(
+                    Schema: g.Key.SchemaName,
+                    Name: g.Key.TableName,
+                    RowCount: rowCounts.TryGetValue(key, out var rc) ? rc : null,
+                    Columns: g.OrderBy(c => c.ColumnId).Select(c => new SchemaColumn(
+                        Name: c.ColumnName,
+                        OrdinalPosition: c.ColumnId,
+                        DataType: c.DataType,
+                        MaxLength: c.MaxLength > 0 && c.MaxLength != -1 ? c.MaxLength.ToString() : (c.MaxLength == -1 ? "MAX" : null),
+                        NumericPrecision: c.NumericPrecision > 0 ? c.NumericPrecision : null,
+                        NumericScale: c.NumericScale >= 0 ? c.NumericScale : null,
+                        IsNullable: c.IsNullable,
+                        IsPrimaryKey: c.IsPrimaryKey,
+                        IsForeignKey: fkSet.Contains((c.SchemaName, c.TableName, c.ColumnName)),
+                        IsIdentity: c.IsIdentity,
+                        IsComputed: c.IsComputed,
+                        DefaultValue: c.DefaultValue,
+                        DbNativeComment: c.MsDescription,
+                        ComputedExpression: c.ComputedDefinition
+                    )).ToList(),
+                    PrimaryKey: pksByTable.TryGetValue(key, out var pk) ? pk : null,
+                    UniqueConstraints: uqByTable.TryGetValue(key, out var uqs) ? uqs : null,
+                    CheckConstraints: checksByTable.TryGetValue(key, out var cks) ? cks : null,
+                    Indexes: indexesByTable.TryGetValue(key, out var ixs) ? ixs : null
+                );
+            })
             .OrderBy(t => t.Schema).ThenBy(t => t.Name)
             .ToList();
     }
@@ -151,6 +224,19 @@ public class SqlServerExtractor : ISchemaExtractor
             OnUpdate: f.OnUpdate
         )).ToList();
 
+    private static List<SchemaTrigger> BuildTriggers(List<RawTrigger> triggers) =>
+        triggers.Select(t => new SchemaTrigger(
+            Schema: t.TableSchema,
+            Name: t.TriggerName,
+            TableSchema: t.TableSchema,
+            TableName: t.TableName,
+            Event: t.EventType,
+            Timing: t.Timing,
+            Definition: t.Definition
+        ))
+        .OrderBy(t => t.TableSchema).ThenBy(t => t.TableName).ThenBy(t => t.Name)
+        .ToList();
+
     // ── Raw DTOs (classes for Dapper compatibility) ────────────────────────
 
     private class RawColumn
@@ -169,6 +255,7 @@ public class SqlServerExtractor : ISchemaExtractor
         public bool IsComputed { get; set; }
         public string? DefaultValue { get; set; }
         public string? MsDescription { get; set; }
+        public string? ComputedDefinition { get; set; }
     }
 
     private class RawForeignKey
@@ -219,6 +306,59 @@ public class SqlServerExtractor : ISchemaExtractor
         public long RowCount { get; set; }
     }
 
+    private class RawPkColumn
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string ConstraintName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public int KeyOrdinal { get; set; }
+        public string? IndexType { get; set; }
+    }
+
+    private class RawUniqueColumn
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string ConstraintName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public int KeyOrdinal { get; set; }
+    }
+
+    private class RawCheck
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string ConstraintName { get; set; } = "";
+        public string Expression { get; set; } = "";
+    }
+
+    private class RawIndexColumn
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string IndexName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public int KeyOrdinal { get; set; }
+        public bool IsDescending { get; set; }
+        public bool IsIncluded { get; set; }
+        public bool IsUnique { get; set; }
+        public bool IsPrimaryKey { get; set; }
+        public bool IsUniqueConstraint { get; set; }
+        public string? IndexType { get; set; }
+        public string? FilterDefinition { get; set; }
+    }
+
+    private class RawTrigger
+    {
+        public string TableSchema { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string TriggerName { get; set; } = "";
+        public string EventType { get; set; } = "";
+        public string Timing { get; set; } = "";
+        public string? Definition { get; set; }
+    }
+
     // ── Queries ───────────────────────────────────────────────────────────────
 
     private const string ColumnsQuery = """
@@ -236,7 +376,8 @@ public class SqlServerExtractor : ISchemaExtractor
             c.is_identity                                   AS IsIdentity,
             c.is_computed                                   AS IsComputed,
             dc.definition                                   AS DefaultValue,
-            CAST(ep.value AS NVARCHAR(4000))                AS MsDescription
+            CAST(ep.value AS NVARCHAR(4000))                AS MsDescription,
+            cc.definition                                   AS ComputedDefinition
         FROM sys.tables t
         JOIN sys.schemas s       ON t.schema_id = s.schema_id
         JOIN sys.columns c       ON t.object_id = c.object_id
@@ -244,6 +385,9 @@ public class SqlServerExtractor : ISchemaExtractor
         LEFT JOIN sys.default_constraints dc
                                  ON dc.parent_object_id = t.object_id
                                  AND dc.parent_column_id = c.column_id
+        LEFT JOIN sys.computed_columns cc
+                                 ON cc.object_id = t.object_id
+                                 AND cc.column_id = c.column_id
         LEFT JOIN (
             SELECT ic.object_id, ic.column_id, idx.is_primary_key
             FROM sys.index_columns ic
@@ -278,6 +422,7 @@ public class SqlServerExtractor : ISchemaExtractor
         JOIN sys.tables rt  ON fkc.referenced_object_id = rt.object_id
         JOIN sys.schemas rs ON rt.schema_id = rs.schema_id
         JOIN sys.columns rc ON fkc.referenced_object_id = rc.object_id AND fkc.referenced_column_id = rc.column_id
+        ORDER BY fk.name, fkc.constraint_column_id
         """;
 
     private const string ViewsQuery = """
@@ -333,5 +478,104 @@ public class SqlServerExtractor : ISchemaExtractor
         JOIN sys.types tp           ON param.user_type_id = tp.user_type_id
         WHERE param.parameter_id > 0
         ORDER BY s.name, p.name, param.parameter_id
+        """;
+
+    private const string PrimaryKeysQuery = """
+        SELECT
+            s.name              AS SchemaName,
+            t.name              AS TableName,
+            kc.name             AS ConstraintName,
+            c.name              AS ColumnName,
+            ic.key_ordinal      AS KeyOrdinal,
+            idx.type_desc       AS IndexType
+        FROM sys.key_constraints kc
+        JOIN sys.tables t           ON kc.parent_object_id = t.object_id
+        JOIN sys.schemas s          ON t.schema_id = s.schema_id
+        JOIN sys.indexes idx        ON idx.object_id = kc.parent_object_id AND idx.index_id = kc.unique_index_id
+        JOIN sys.index_columns ic   ON ic.object_id = idx.object_id AND ic.index_id = idx.index_id
+        JOIN sys.columns c          ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+        WHERE kc.type = 'PK'
+        ORDER BY s.name, t.name, ic.key_ordinal
+        """;
+
+    private const string UniqueConstraintsQuery = """
+        SELECT
+            s.name              AS SchemaName,
+            t.name              AS TableName,
+            kc.name             AS ConstraintName,
+            c.name              AS ColumnName,
+            ic.key_ordinal      AS KeyOrdinal
+        FROM sys.key_constraints kc
+        JOIN sys.tables t           ON kc.parent_object_id = t.object_id
+        JOIN sys.schemas s          ON t.schema_id = s.schema_id
+        JOIN sys.indexes idx        ON idx.object_id = kc.parent_object_id AND idx.index_id = kc.unique_index_id
+        JOIN sys.index_columns ic   ON ic.object_id = idx.object_id AND ic.index_id = idx.index_id
+        JOIN sys.columns c          ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+        WHERE kc.type = 'UQ'
+        ORDER BY s.name, t.name, kc.name, ic.key_ordinal
+        """;
+
+    private const string CheckConstraintsQuery = """
+        SELECT
+            s.name              AS SchemaName,
+            t.name              AS TableName,
+            cc.name             AS ConstraintName,
+            cc.definition       AS Expression
+        FROM sys.check_constraints cc
+        JOIN sys.tables t           ON cc.parent_object_id = t.object_id
+        JOIN sys.schemas s          ON t.schema_id = s.schema_id
+        ORDER BY s.name, t.name, cc.name
+        """;
+
+    private const string IndexesQuery = """
+        SELECT
+            s.name                                  AS SchemaName,
+            t.name                                  AS TableName,
+            idx.name                                AS IndexName,
+            c.name                                  AS ColumnName,
+            ic.key_ordinal                          AS KeyOrdinal,
+            ic.is_descending_key                    AS IsDescending,
+            ic.is_included_column                   AS IsIncluded,
+            idx.is_unique                           AS IsUnique,
+            idx.is_primary_key                      AS IsPrimaryKey,
+            idx.is_unique_constraint                AS IsUniqueConstraint,
+            idx.type_desc                           AS IndexType,
+            idx.filter_definition                   AS FilterDefinition
+        FROM sys.indexes idx
+        JOIN sys.tables t           ON idx.object_id = t.object_id
+        JOIN sys.schemas s          ON t.schema_id = s.schema_id
+        JOIN sys.index_columns ic   ON ic.object_id = idx.object_id AND ic.index_id = idx.index_id
+        JOIN sys.columns c          ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+        WHERE idx.name IS NOT NULL
+        ORDER BY s.name, t.name, idx.name, ic.is_included_column, ic.key_ordinal
+        """;
+
+    private const string TriggersQuery = """
+        SELECT
+            s.name                                  AS TableSchema,
+            t.name                                  AS TableName,
+            tr.name                                 AS TriggerName,
+            CASE
+                WHEN OBJECTPROPERTY(tr.object_id, 'ExecIsInsertTrigger') = 1 AND OBJECTPROPERTY(tr.object_id, 'ExecIsUpdateTrigger') = 1 AND OBJECTPROPERTY(tr.object_id, 'ExecIsDeleteTrigger') = 1 THEN 'INSERT,UPDATE,DELETE'
+                WHEN OBJECTPROPERTY(tr.object_id, 'ExecIsInsertTrigger') = 1 AND OBJECTPROPERTY(tr.object_id, 'ExecIsUpdateTrigger') = 1 THEN 'INSERT,UPDATE'
+                WHEN OBJECTPROPERTY(tr.object_id, 'ExecIsInsertTrigger') = 1 AND OBJECTPROPERTY(tr.object_id, 'ExecIsDeleteTrigger') = 1 THEN 'INSERT,DELETE'
+                WHEN OBJECTPROPERTY(tr.object_id, 'ExecIsUpdateTrigger') = 1 AND OBJECTPROPERTY(tr.object_id, 'ExecIsDeleteTrigger') = 1 THEN 'UPDATE,DELETE'
+                WHEN OBJECTPROPERTY(tr.object_id, 'ExecIsInsertTrigger') = 1 THEN 'INSERT'
+                WHEN OBJECTPROPERTY(tr.object_id, 'ExecIsUpdateTrigger') = 1 THEN 'UPDATE'
+                WHEN OBJECTPROPERTY(tr.object_id, 'ExecIsDeleteTrigger') = 1 THEN 'DELETE'
+                ELSE ''
+            END                                     AS EventType,
+            CASE
+                WHEN OBJECTPROPERTY(tr.object_id, 'ExecIsInsteadOfTrigger') = 1 THEN 'INSTEAD OF'
+                WHEN OBJECTPROPERTY(tr.object_id, 'ExecIsAfterTrigger') = 1 THEN 'AFTER'
+                ELSE 'FOR'
+            END                                     AS Timing,
+            sm.definition                           AS Definition
+        FROM sys.triggers tr
+        JOIN sys.tables t       ON tr.parent_id = t.object_id
+        JOIN sys.schemas s      ON t.schema_id = s.schema_id
+        LEFT JOIN sys.sql_modules sm ON tr.object_id = sm.object_id
+        WHERE tr.parent_class = 1
+        ORDER BY s.name, t.name, tr.name
         """;
 }

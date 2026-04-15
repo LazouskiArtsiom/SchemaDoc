@@ -34,10 +34,18 @@ public class PostgreSqlExtractor : ISchemaExtractor
         var procs = (await conn.QueryAsync<RawProc>(ProcsQuery)).ToList();
         var procParams = (await conn.QueryAsync<RawProcParam>(ProcParamsQuery)).ToList();
 
-        var tables = BuildTables(columns, fks);
+        // Step 1 enhanced diff data
+        var primaryKeys = (await conn.QueryAsync<RawPkColumn>(PrimaryKeysQuery)).ToList();
+        var uniqueConstraints = (await conn.QueryAsync<RawUniqueColumn>(UniqueConstraintsQuery)).ToList();
+        var checkConstraints = (await conn.QueryAsync<RawCheck>(CheckConstraintsQuery)).ToList();
+        var indexes = (await conn.QueryAsync<RawIndexColumn>(IndexesQuery)).ToList();
+        var triggers = (await conn.QueryAsync<RawTrigger>(TriggersQuery)).ToList();
+
+        var tables = BuildTables(columns, fks, primaryKeys, uniqueConstraints, checkConstraints, indexes);
         var schemaViews = BuildViews(views);
         var storedProcs = BuildProcs(procs, procParams);
         var foreignKeys = BuildForeignKeys(fks);
+        var triggerList = BuildTriggers(triggers);
 
         return new DatabaseSchema(
             DatabaseName: dbName,
@@ -46,43 +54,112 @@ public class PostgreSqlExtractor : ISchemaExtractor
             Tables: tables,
             Views: schemaViews,
             StoredProcedures: storedProcs,
-            ForeignKeys: foreignKeys
+            ForeignKeys: foreignKeys,
+            Triggers: triggerList
         );
     }
 
     // ── Build helpers ────────────────────────────────────────────────────────
 
-    private static List<SchemaTable> BuildTables(List<RawColumn> columns, List<RawForeignKey> fks)
+    private static List<SchemaTable> BuildTables(
+        List<RawColumn> columns,
+        List<RawForeignKey> fks,
+        List<RawPkColumn> primaryKeys,
+        List<RawUniqueColumn> uniqueConstraints,
+        List<RawCheck> checkConstraints,
+        List<RawIndexColumn> indexes)
     {
         var fkSet = fks
             .Select(f => (f.ParentSchema, f.ParentTable, f.ParentColumn))
             .ToHashSet();
 
+        var pksByTable = primaryKeys
+            .GroupBy(p => (p.SchemaName, p.TableName))
+            .ToDictionary(g => g.Key, g => new PrimaryKeyInfo(
+                Name: g.First().ConstraintName,
+                Columns: g.OrderBy(c => c.KeyOrdinal).Select(c => c.ColumnName).ToList(),
+                IndexType: "BTREE"));
+
+        var uqByTable = uniqueConstraints
+            .GroupBy(u => (u.SchemaName, u.TableName))
+            .ToDictionary(g => g.Key, g => g
+                .GroupBy(u => u.ConstraintName)
+                .Select(cg => new UniqueConstraint(
+                    Name: cg.Key,
+                    Columns: cg.OrderBy(c => c.KeyOrdinal).Select(c => c.ColumnName).ToList()))
+                .ToList());
+
+        var checksByTable = checkConstraints
+            .GroupBy(c => (c.SchemaName, c.TableName))
+            .ToDictionary(g => g.Key, g => g
+                .Select(c => new CheckConstraint(c.ConstraintName, c.Expression))
+                .ToList());
+
+        // PG: indexes already filter PK/UQ via is_primary/is_unique_constraint
+        var indexesByTable = indexes
+            .Where(i => !i.IsPrimaryKey && !i.IsUniqueConstraint)
+            .GroupBy(i => (i.SchemaName, i.TableName))
+            .ToDictionary(g => g.Key, g => g
+                .GroupBy(i => i.IndexName)
+                .Select(ig =>
+                {
+                    var ordered = ig.OrderBy(c => c.KeyOrdinal).ToList();
+                    return new SchemaIndex(
+                        Name: ig.Key,
+                        Columns: ordered.Select(c => new IndexColumn(c.ColumnName, c.IsDescending)).ToList(),
+                        IncludedColumns: null,
+                        IsUnique: ig.First().IsUnique,
+                        IndexType: ig.First().IndexType,
+                        FilterExpression: ig.First().FilterDefinition);
+                })
+                .ToList());
+
         return columns
             .GroupBy(c => (c.SchemaName, c.TableName))
-            .Select(g => new SchemaTable(
-                Schema: g.Key.SchemaName,
-                Name: g.Key.TableName,
-                RowCount: null,
-                Columns: g.OrderBy(c => c.OrdinalPosition).Select(c => new SchemaColumn(
-                    Name: c.ColumnName,
-                    OrdinalPosition: c.OrdinalPosition,
-                    DataType: c.DataType,
-                    MaxLength: c.CharacterMaximumLength > 0 ? c.CharacterMaximumLength.ToString() : null,
-                    NumericPrecision: c.NumericPrecision > 0 ? c.NumericPrecision : null,
-                    NumericScale: c.NumericScale >= 0 ? c.NumericScale : null,
-                    IsNullable: c.IsNullable,
-                    IsPrimaryKey: c.IsPrimaryKey,
-                    IsForeignKey: fkSet.Contains((c.SchemaName, c.TableName, c.ColumnName)),
-                    IsIdentity: c.IsIdentity,
-                    IsComputed: c.IsComputed,
-                    DefaultValue: c.ColumnDefault,
-                    DbNativeComment: c.ColumnComment
-                )).ToList()
-            ))
+            .Select(g =>
+            {
+                var key = (g.Key.SchemaName, g.Key.TableName);
+                return new SchemaTable(
+                    Schema: g.Key.SchemaName,
+                    Name: g.Key.TableName,
+                    RowCount: null,
+                    Columns: g.OrderBy(c => c.OrdinalPosition).Select(c => new SchemaColumn(
+                        Name: c.ColumnName,
+                        OrdinalPosition: c.OrdinalPosition,
+                        DataType: c.DataType,
+                        MaxLength: c.CharacterMaximumLength > 0 ? c.CharacterMaximumLength.ToString() : null,
+                        NumericPrecision: c.NumericPrecision > 0 ? c.NumericPrecision : null,
+                        NumericScale: c.NumericScale >= 0 ? c.NumericScale : null,
+                        IsNullable: c.IsNullable,
+                        IsPrimaryKey: c.IsPrimaryKey,
+                        IsForeignKey: fkSet.Contains((c.SchemaName, c.TableName, c.ColumnName)),
+                        IsIdentity: c.IsIdentity,
+                        IsComputed: c.IsComputed,
+                        DefaultValue: c.ColumnDefault,
+                        DbNativeComment: c.ColumnComment
+                    )).ToList(),
+                    PrimaryKey: pksByTable.TryGetValue(key, out var pk) ? pk : null,
+                    UniqueConstraints: uqByTable.TryGetValue(key, out var uqs) ? uqs : null,
+                    CheckConstraints: checksByTable.TryGetValue(key, out var cks) ? cks : null,
+                    Indexes: indexesByTable.TryGetValue(key, out var ixs) ? ixs : null
+                );
+            })
             .OrderBy(t => t.Schema).ThenBy(t => t.Name)
             .ToList();
     }
+
+    private static List<SchemaTrigger> BuildTriggers(List<RawTrigger> triggers) =>
+        triggers.Select(t => new SchemaTrigger(
+            Schema: t.TriggerSchema,
+            Name: t.TriggerName,
+            TableSchema: t.TableSchema,
+            TableName: t.TableName,
+            Event: t.EventType,
+            Timing: t.Timing,
+            Definition: t.Definition
+        ))
+        .OrderBy(t => t.TableSchema).ThenBy(t => t.TableName).ThenBy(t => t.Name)
+        .ToList();
 
     private static List<SchemaView> BuildViews(List<RawView> views)
     {
@@ -215,6 +292,58 @@ public class PostgreSqlExtractor : ISchemaExtractor
         public bool HasDefault { get; set; }
     }
 
+    private class RawPkColumn
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string ConstraintName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public int KeyOrdinal { get; set; }
+    }
+
+    private class RawUniqueColumn
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string ConstraintName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public int KeyOrdinal { get; set; }
+    }
+
+    private class RawCheck
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string ConstraintName { get; set; } = "";
+        public string Expression { get; set; } = "";
+    }
+
+    private class RawIndexColumn
+    {
+        public string SchemaName { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string IndexName { get; set; } = "";
+        public string ColumnName { get; set; } = "";
+        public int KeyOrdinal { get; set; }
+        public bool IsDescending { get; set; }
+        public bool IsUnique { get; set; }
+        public bool IsPrimaryKey { get; set; }
+        public bool IsUniqueConstraint { get; set; }
+        public string? IndexType { get; set; }
+        public string? FilterDefinition { get; set; }
+    }
+
+    private class RawTrigger
+    {
+        public string TriggerSchema { get; set; } = "";
+        public string TriggerName { get; set; } = "";
+        public string TableSchema { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public string EventType { get; set; } = "";
+        public string Timing { get; set; } = "";
+        public string? Definition { get; set; }
+    }
+
     // ── Queries ───────────────────────────────────────────────────────────────
 
     private const string ColumnsQuery = """
@@ -329,5 +458,93 @@ public class PostgreSqlExtractor : ISchemaExtractor
           AND r.routine_type IN ('PROCEDURE', 'FUNCTION')
           AND p.ordinal_position > 0
         ORDER BY r.routine_schema, r.routine_name, p.ordinal_position
+        """;
+
+    private const string PrimaryKeysQuery = """
+        SELECT
+            tc.table_schema                             AS SchemaName,
+            tc.table_name                               AS TableName,
+            tc.constraint_name                          AS ConstraintName,
+            kcu.column_name                             AS ColumnName,
+            kcu.ordinal_position                        AS KeyOrdinal
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+            ON kcu.constraint_name = tc.constraint_name
+            AND kcu.table_schema = tc.table_schema
+        WHERE tc.constraint_type = 'PRIMARY KEY'
+          AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY tc.table_schema, tc.table_name, kcu.ordinal_position
+        """;
+
+    private const string UniqueConstraintsQuery = """
+        SELECT
+            tc.table_schema                             AS SchemaName,
+            tc.table_name                               AS TableName,
+            tc.constraint_name                          AS ConstraintName,
+            kcu.column_name                             AS ColumnName,
+            kcu.ordinal_position                        AS KeyOrdinal
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+            ON kcu.constraint_name = tc.constraint_name
+            AND kcu.table_schema = tc.table_schema
+        WHERE tc.constraint_type = 'UNIQUE'
+          AND tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY tc.table_schema, tc.table_name, tc.constraint_name, kcu.ordinal_position
+        """;
+
+    private const string CheckConstraintsQuery = """
+        SELECT
+            n.nspname                                   AS SchemaName,
+            cl.relname                                  AS TableName,
+            con.conname                                 AS ConstraintName,
+            pg_catalog.pg_get_constraintdef(con.oid, true) AS Expression
+        FROM pg_catalog.pg_constraint con
+        JOIN pg_catalog.pg_class cl   ON cl.oid = con.conrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = cl.relnamespace
+        WHERE con.contype = 'c'
+          AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY n.nspname, cl.relname, con.conname
+        """;
+
+    private const string IndexesQuery = """
+        SELECT
+            n.nspname                                   AS SchemaName,
+            cl.relname                                  AS TableName,
+            ic.relname                                  AS IndexName,
+            att.attname                                 AS ColumnName,
+            (array_position(ix.indkey, att.attnum))::int AS KeyOrdinal,
+            false                                       AS IsDescending,
+            ix.indisunique                              AS IsUnique,
+            ix.indisprimary                             AS IsPrimaryKey,
+            CASE WHEN con.contype = 'u' THEN true ELSE false END AS IsUniqueConstraint,
+            am.amname                                   AS IndexType,
+            pg_catalog.pg_get_expr(ix.indpred, ix.indrelid) AS FilterDefinition
+        FROM pg_catalog.pg_index ix
+        JOIN pg_catalog.pg_class cl      ON cl.oid = ix.indrelid
+        JOIN pg_catalog.pg_class ic      ON ic.oid = ix.indexrelid
+        JOIN pg_catalog.pg_namespace n   ON n.oid = cl.relnamespace
+        JOIN pg_catalog.pg_am am         ON am.oid = ic.relam
+        JOIN pg_catalog.pg_attribute att
+            ON att.attrelid = cl.oid
+            AND att.attnum = ANY(ix.indkey)
+        LEFT JOIN pg_catalog.pg_constraint con
+            ON con.conindid = ix.indexrelid
+        WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY n.nspname, cl.relname, ic.relname, KeyOrdinal
+        """;
+
+    private const string TriggersQuery = """
+        SELECT
+            trg.trigger_schema                          AS TriggerSchema,
+            trg.trigger_name                            AS TriggerName,
+            trg.event_object_schema                     AS TableSchema,
+            trg.event_object_table                      AS TableName,
+            string_agg(DISTINCT trg.event_manipulation, ',')  AS EventType,
+            trg.action_timing                           AS Timing,
+            trg.action_statement                        AS Definition
+        FROM information_schema.triggers trg
+        WHERE trg.trigger_schema NOT IN ('pg_catalog', 'information_schema')
+        GROUP BY trg.trigger_schema, trg.trigger_name, trg.event_object_schema, trg.event_object_table, trg.action_timing, trg.action_statement
+        ORDER BY trg.event_object_schema, trg.event_object_table, trg.trigger_name
         """;
 }
