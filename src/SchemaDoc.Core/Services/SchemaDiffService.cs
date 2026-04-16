@@ -425,9 +425,22 @@ public class SchemaDiffService
             changes.Add($"Event: {baseline.Event} → {current.Event}");
         if (baseline.Timing != current.Timing)
             changes.Add($"Timing: {baseline.Timing} → {current.Timing}");
-        if (!StringsEq(baseline.Definition, current.Definition))
+        // Normalize whitespace to avoid false positives from formatting differences
+        // (e.g. trigger text stored with different line endings or indentation)
+        if (NormalizeSqlText(baseline.Definition) != NormalizeSqlText(current.Definition))
             changes.Add("Definition changed");
         return changes;
+    }
+
+    private static string NormalizeSqlText(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "";
+        // Strip line comments (-- ... to end of line)
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"--[^\r\n]*", "");
+        // Strip block comments /* ... */
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"/\*.*?\*/", "", System.Text.RegularExpressions.RegexOptions.Singleline);
+        // Collapse whitespace
+        return System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
     }
 
     private static string FormatIndexCol(IndexColumn c) => c.IsDescending ? $"{c.Name} DESC" : c.Name;

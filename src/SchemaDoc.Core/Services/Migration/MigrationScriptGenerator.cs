@@ -398,6 +398,14 @@ public class MigrationScriptGenerator
                 lastCategory = action.Category;
             }
             sb.AppendLine($"-- {action.Description}");
+
+            // CREATE TRIGGER on SQL Server stores the entire batch text (including
+            // leading comments) as the trigger definition in sys.sql_modules.
+            // Emit an early terminator so the comment ends up in a separate batch.
+            var isCreateTrigger = action.Type == MigrationActionType.CreateTrigger;
+            if (isCreateTrigger && !string.IsNullOrEmpty(dialect.StatementTerminator))
+                sb.AppendLine(dialect.StatementTerminator);
+
             sb.AppendLine(action.Sql);
             if (!string.IsNullOrEmpty(dialect.StatementTerminator))
                 sb.AppendLine(dialect.StatementTerminator);
