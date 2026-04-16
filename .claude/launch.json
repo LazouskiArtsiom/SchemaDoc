@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "SchemaDoc",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/SchemaDoc.Web/SchemaDoc.Web.csproj", "--no-build"],
+      "port": 5096
+    }
+  ]
+}

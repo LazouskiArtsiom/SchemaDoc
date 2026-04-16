@@ -106,6 +106,22 @@ public record SchemaTrigger(
     public string FullName => $"{Schema}.{Name}";
 }
 
+/// <summary>
+/// Groups multiple ForeignKeyRelation rows (one per column pair) into a single FK constraint.
+/// Used by diff and migration script generation.
+/// </summary>
+public record ForeignKeyGroup(
+    string ConstraintName,
+    string ParentSchema,
+    string ParentTable,
+    IReadOnlyList<string> ParentColumns,
+    string ReferencedSchema,
+    string ReferencedTable,
+    IReadOnlyList<string> ReferencedColumns,
+    string? OnDelete,
+    string? OnUpdate
+);
+
 public record SchemaView(
     string Schema,
     string Name,

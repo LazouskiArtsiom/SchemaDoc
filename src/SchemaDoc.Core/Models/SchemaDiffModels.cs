@@ -34,7 +34,10 @@ public record TableDiff(
     IReadOnlyList<ConstraintDiff>? ModifiedCheckConstraints = null,
     IReadOnlyList<SchemaIndex>? AddedIndexes = null,
     IReadOnlyList<SchemaIndex>? RemovedIndexes = null,
-    IReadOnlyList<IndexDiff>? ModifiedIndexes = null
+    IReadOnlyList<IndexDiff>? ModifiedIndexes = null,
+    IReadOnlyList<ForeignKeyGroup>? AddedForeignKeys = null,
+    IReadOnlyList<ForeignKeyGroup>? RemovedForeignKeys = null,
+    IReadOnlyList<ConstraintDiff>? ModifiedForeignKeys = null
 )
 {
     public string FullName => $"{Schema}.{Name}";
@@ -44,7 +47,8 @@ public record TableDiff(
         (PrimaryKeyChanges?.Count ?? 0) +
         (AddedUniqueConstraints?.Count ?? 0) + (RemovedUniqueConstraints?.Count ?? 0) + (ModifiedUniqueConstraints?.Count ?? 0) +
         (AddedCheckConstraints?.Count ?? 0) + (RemovedCheckConstraints?.Count ?? 0) + (ModifiedCheckConstraints?.Count ?? 0) +
-        (AddedIndexes?.Count ?? 0) + (RemovedIndexes?.Count ?? 0) + (ModifiedIndexes?.Count ?? 0);
+        (AddedIndexes?.Count ?? 0) + (RemovedIndexes?.Count ?? 0) + (ModifiedIndexes?.Count ?? 0) +
+        (AddedForeignKeys?.Count ?? 0) + (RemovedForeignKeys?.Count ?? 0) + (ModifiedForeignKeys?.Count ?? 0);
 }
 
 public record ColumnDiff(

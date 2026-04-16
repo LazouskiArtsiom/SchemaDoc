@@ -12,6 +12,10 @@ public class SchemaDiffService
         var baselineTables = baseline.Tables.ToDictionary(t => t.FullName, t => t);
         var currentTables  = current.Tables.ToDictionary(t => t.FullName, t => t);
 
+        // Group FKs by parent table for per-table diffing
+        var baselineFks = GroupForeignKeys(baseline.ForeignKeys);
+        var currentFks = GroupForeignKeys(current.ForeignKeys);
+
         var addedTables = currentTables.Values
             .Where(t => !baselineTables.ContainsKey(t.FullName))
             .OrderBy(t => t.FullName)
@@ -28,7 +32,9 @@ public class SchemaDiffService
         {
             var baseTable    = baselineTables[key];
             var currentTable = currentTables[key];
-            var diff         = DiffTable(baseTable, currentTable);
+            var baseFks      = baselineFks.TryGetValue(key, out var bf) ? bf : new List<ForeignKeyGroup>();
+            var currFks      = currentFks.TryGetValue(key, out var cf) ? cf : new List<ForeignKeyGroup>();
+            var diff         = DiffTable(baseTable, currentTable, baseFks, currFks);
             if (diff.TotalChanges > 0)
                 modifiedTables.Add(diff);
         }
@@ -61,7 +67,36 @@ public class SchemaDiffService
         );
     }
 
-    private static TableDiff DiffTable(SchemaTable baseline, SchemaTable current)
+    /// <summary>Groups flat FK rows by (parentSchema.parentTable) -> ForeignKeyGroup list.</summary>
+    public static Dictionary<string, List<ForeignKeyGroup>> GroupForeignKeys(IReadOnlyList<ForeignKeyRelation> fks)
+    {
+        return fks
+            .GroupBy(f => f.ConstraintName + "|" + f.ParentSchema + "|" + f.ParentTable)
+            .Select(g =>
+            {
+                var first = g.First();
+                var parentCols = g.Select(f => f.ParentColumn).ToList();
+                var refCols = g.Select(f => f.ReferencedColumn).ToList();
+                return new ForeignKeyGroup(
+                    first.ConstraintName,
+                    first.ParentSchema,
+                    first.ParentTable,
+                    parentCols,
+                    first.ReferencedSchema,
+                    first.ReferencedTable,
+                    refCols,
+                    first.OnDelete,
+                    first.OnUpdate);
+            })
+            .GroupBy(g => $"{g.ParentSchema}.{g.ParentTable}")
+            .ToDictionary(g => g.Key, g => g.ToList());
+    }
+
+    private static TableDiff DiffTable(
+        SchemaTable baseline,
+        SchemaTable current,
+        List<ForeignKeyGroup> baselineFks,
+        List<ForeignKeyGroup> currentFks)
     {
         // ── Column diffs ──────────────────────────────────────────
         var baselineCols = baseline.Columns.ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
@@ -100,6 +135,9 @@ public class SchemaDiffService
         var (addedIx, removedIx, modifiedIx) = DiffIndexes(
             baseline.Indexes, current.Indexes);
 
+        // ── Foreign Keys ──────────────────────────────────
+        var (addedFk, removedFk, modifiedFk) = DiffForeignKeys(baselineFks, currentFks);
+
         return new TableDiff(
             baseline.Schema,
             baseline.Name,
@@ -115,8 +153,49 @@ public class SchemaDiffService
             ModifiedCheckConstraints: modifiedCk.Count > 0 ? modifiedCk : null,
             AddedIndexes: addedIx.Count > 0 ? addedIx : null,
             RemovedIndexes: removedIx.Count > 0 ? removedIx : null,
-            ModifiedIndexes: modifiedIx.Count > 0 ? modifiedIx : null
+            ModifiedIndexes: modifiedIx.Count > 0 ? modifiedIx : null,
+            AddedForeignKeys: addedFk.Count > 0 ? addedFk : null,
+            RemovedForeignKeys: removedFk.Count > 0 ? removedFk : null,
+            ModifiedForeignKeys: modifiedFk.Count > 0 ? modifiedFk : null
         );
+    }
+
+    private static (List<ForeignKeyGroup> Added, List<ForeignKeyGroup> Removed, List<ConstraintDiff> Modified)
+        DiffForeignKeys(List<ForeignKeyGroup> baseline, List<ForeignKeyGroup> current)
+    {
+        var b = baseline.ToDictionary(f => f.ConstraintName, f => f, StringComparer.OrdinalIgnoreCase);
+        var c = current.ToDictionary(f => f.ConstraintName, f => f, StringComparer.OrdinalIgnoreCase);
+
+        var added = c.Values.Where(f => !b.ContainsKey(f.ConstraintName)).ToList();
+        var removed = b.Values.Where(f => !c.ContainsKey(f.ConstraintName)).ToList();
+
+        var modified = new List<ConstraintDiff>();
+        foreach (var name in b.Keys.Where(n => c.ContainsKey(n)))
+        {
+            var bf = b[name];
+            var cf = c[name];
+            var changes = new List<string>();
+
+            var baseCols = string.Join(", ", bf.ParentColumns);
+            var currCols = string.Join(", ", cf.ParentColumns);
+            if (baseCols != currCols)
+                changes.Add($"Columns: ({baseCols}) → ({currCols})");
+
+            var baseRef = $"{bf.ReferencedSchema}.{bf.ReferencedTable}({string.Join(", ", bf.ReferencedColumns)})";
+            var currRef = $"{cf.ReferencedSchema}.{cf.ReferencedTable}({string.Join(", ", cf.ReferencedColumns)})";
+            if (baseRef != currRef)
+                changes.Add($"References: {baseRef} → {currRef}");
+
+            if (!StringsEq(bf.OnDelete, cf.OnDelete))
+                changes.Add($"On Delete: {FormatVal(bf.OnDelete)} → {FormatVal(cf.OnDelete)}");
+
+            if (!StringsEq(bf.OnUpdate, cf.OnUpdate))
+                changes.Add($"On Update: {FormatVal(bf.OnUpdate)} → {FormatVal(cf.OnUpdate)}");
+
+            if (changes.Count > 0)
+                modified.Add(new ConstraintDiff(name, changes));
+        }
+        return (added, removed, modified);
     }
 
     private static List<string> DiffColumn(SchemaColumn baseline, SchemaColumn current)

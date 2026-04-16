@@ -1,10 +1,12 @@
 @page "/diff"
 @layout SchemaDoc.Web.Components.Layout.MainLayout
+@using SchemaDoc.Core.Services.Migration
 @inject SchemaDoc.Web.Services.SchemaSessionState SessionState
 @inject ISchemaSnapshotRepository SnapshotRepo
 @inject IConnectionRepository ConnectionRepo
 @inject SchemaDoc.Web.Services.SchemaLoaderService SchemaLoader
 @inject SchemaDoc.Core.Services.SchemaDiffService DiffService
+@inject IJSRuntime JS
 
 <PageTitle>Schema Diff - SchemaDoc</PageTitle>
 
@@ -413,6 +415,48 @@
                                             }
                                         </div>
                                     }
+
+                                    @* Foreign Keys *@
+                                    @{
+                                        var hasFk = (table.AddedForeignKeys?.Count ?? 0) + (table.RemovedForeignKeys?.Count ?? 0) + (table.ModifiedForeignKeys?.Count ?? 0) > 0;
+                                    }
+                                    @if (hasFk)
+                                    {
+                                        <div class="space-y-1">
+                                            <div class="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Foreign Keys</div>
+                                            @if (table.AddedForeignKeys is not null)
+                                            {
+                                                foreach (var fk in table.AddedForeignKeys)
+                                                {
+                                                    <div class="text-xs text-green-600 dark:text-green-400">
+                                                        <span class="font-bold">+</span> <span class="font-medium">@fk.ConstraintName</span>
+                                                        <span class="text-green-500 dark:text-green-500">(@(string.Join(", ", fk.ParentColumns))) → @(fk.ReferencedSchema + "." + fk.ReferencedTable)(@(string.Join(", ", fk.ReferencedColumns)))</span>
+                                                    </div>
+                                                }
+                                            }
+                                            @if (table.RemovedForeignKeys is not null)
+                                            {
+                                                foreach (var fk in table.RemovedForeignKeys)
+                                                {
+                                                    <div class="text-xs text-red-600 dark:text-red-400">
+                                                        <span class="font-bold">-</span> <span class="font-medium">@fk.ConstraintName</span>
+                                                    </div>
+                                                }
+                                            }
+                                            @if (table.ModifiedForeignKeys is not null)
+                                            {
+                                                foreach (var fkDiff in table.ModifiedForeignKeys)
+                                                {
+                                                    foreach (var change in fkDiff.Changes)
+                                                    {
+                                                        <div class="text-xs text-amber-600 dark:text-amber-400">
+                                                            <span class="font-bold">~</span> <span class="font-medium">@fkDiff.Name</span> — @change
+                                                        </div>
+                                                    }
+                                                }
+                                            }
+                                        </div>
+                                    }
                                 </div>
                             </details>
                         }
@@ -464,6 +508,118 @@
                     </div>
                 </div>
             }
+
+            @* ─── Migration Script Generator ────────────────────── *@
+            @if (!diffResult.IsIdentical && canGenerateScript)
+            {
+                <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl mt-6 overflow-hidden">
+                    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                        <div>
+                            <h2 class="text-sm font-semibold text-gray-800 dark:text-gray-100">Migration Script</h2>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Generate SQL to apply these changes</p>
+                        </div>
+                        @if (!scriptPanelOpen)
+                        {
+                            <button class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg font-medium transition-colors"
+                                    @onclick="OpenScriptPanel">
+                                Generate Migration Script
+                            </button>
+                        }
+                    </div>
+
+                    @if (scriptPanelOpen)
+                    {
+                        <div class="p-4 space-y-4">
+                            <!-- Direction selector -->
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Direction</label>
+                                <div class="flex items-center gap-2 text-sm">
+                                    <button class="px-3 py-1.5 rounded-lg border transition-colors @(scriptDirection == ScriptDirection.BaselineToTarget ? "border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium" : "border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400")"
+                                            @onclick="() => SetDirection(ScriptDirection.BaselineToTarget)">
+                                        Apply to @GetLabel(true) → match @GetLabel(false)
+                                    </button>
+                                    <button class="px-3 py-1.5 rounded-lg border transition-colors @(scriptDirection == ScriptDirection.TargetToBaseline ? "border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium" : "border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400")"
+                                            @onclick="() => SetDirection(ScriptDirection.TargetToBaseline)">
+                                        Apply to @GetLabel(false) → match @GetLabel(true)
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Action checkboxes -->
+                            @if (migrationActions.Count > 0)
+                            {
+                                <div>
+                                    <div class="flex items-center justify-between mb-2">
+                                        <label class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Changes to Include (@selectedActionIds.Count / @migrationActions.Count)</label>
+                                        <div class="flex items-center gap-2">
+                                            <button class="text-xs text-blue-600 dark:text-blue-400 hover:underline" @onclick="SelectAllActions">Select all</button>
+                                            <span class="text-gray-300 dark:text-gray-600">·</span>
+                                            <button class="text-xs text-blue-600 dark:text-blue-400 hover:underline" @onclick="DeselectAllActions">Deselect all</button>
+                                        </div>
+                                    </div>
+                                    <div class="max-h-72 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-700">
+                                        @foreach (var group in migrationActions.GroupBy(a => a.Category))
+                                        {
+                                            <div>
+                                                <div class="px-3 py-1.5 bg-gray-50 dark:bg-gray-900/50 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                                                    @group.Key (@group.Count())
+                                                </div>
+                                                @foreach (var action in group)
+                                                {
+                                                    var actionId = action.Id;
+                                                    <label class="flex items-start gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer">
+                                                        <input type="checkbox" class="mt-0.5 flex-shrink-0"
+                                                               checked="@selectedActionIds.Contains(actionId)"
+                                                               @onchange="@(e => ToggleAction(actionId, (bool)e.Value!))" />
+                                                        <div class="text-xs min-w-0 flex-1">
+                                                            <div class="text-gray-800 dark:text-gray-200 truncate">@action.Description</div>
+                                                            <div class="text-[10px] text-gray-400 dark:text-gray-500 font-mono mt-0.5">@action.TableFullName</div>
+                                                        </div>
+                                                    </label>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            <div class="flex items-center gap-2">
+                                <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                                        @onclick="GenerateScript" disabled="@(selectedActionIds.Count == 0)">
+                                    Generate SQL
+                                </button>
+                                @if (!string.IsNullOrEmpty(generatedScript))
+                                {
+                                    <button class="text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 px-4 py-1.5 rounded-lg font-medium transition-colors"
+                                            @onclick="CopyScript">
+                                        @(copyStatus ?? "Copy")
+                                    </button>
+                                    <button class="text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 px-4 py-1.5 rounded-lg font-medium transition-colors"
+                                            @onclick="DownloadScript">
+                                        Download .sql
+                                    </button>
+                                }
+                                <button class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1.5 ml-auto"
+                                        @onclick="CloseScriptPanel">Close</button>
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(generatedScript))
+                            {
+                                <pre class="bg-gray-900 dark:bg-black text-green-300 text-xs font-mono p-4 rounded-lg overflow-x-auto max-h-96 border border-gray-700">@generatedScript</pre>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            else if (!diffResult.IsIdentical && !canGenerateScript)
+            {
+                <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl mt-6 p-4">
+                    <p class="text-sm text-amber-700 dark:text-amber-300">
+                        <strong>Migration script generation not available</strong> — the two schemas use different database engines.
+                        Cross-engine migration is not supported (and generally not safe to do automatically).
+                    </p>
+                </div>
+            }
         }
     }
 </div>
@@ -487,6 +643,32 @@
     private bool running;
     private string? errorMessage;
     private SchemaDiffResult? diffResult;
+
+    // Captured schemas for script generation (baseline = what user selected as baseline)
+    private DatabaseSchema? baselineSchema;
+    private DatabaseSchema? targetSchema;
+
+    // Migration script UI state
+    private enum ScriptDirection { BaselineToTarget, TargetToBaseline }
+    private bool scriptPanelOpen;
+    private ScriptDirection scriptDirection = ScriptDirection.BaselineToTarget;
+    private List<MigrationAction> migrationActions = [];
+    private HashSet<string> selectedActionIds = [];
+    private string? generatedScript;
+    private string? copyStatus;
+
+    private bool canGenerateScript =>
+        baselineSchema is not null &&
+        targetSchema is not null &&
+        baselineSchema.Provider == targetSchema.Provider &&
+        baselineSchema.Provider != DatabaseProvider.CosmosDb;
+
+    private string GetLabel(bool isBaseline)
+    {
+        if (crossDiffLabels.HasValue)
+            return isBaseline ? crossDiffLabels.Value.Baseline : crossDiffLabels.Value.Compare;
+        return isBaseline ? "baseline" : "compare";
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -525,6 +707,7 @@
         errorMessage = null;
         diffResult = null;
         crossDiffLabels = null;
+        ResetScriptState();
 
         try
         {
@@ -536,6 +719,9 @@
                 return;
             }
             diffResult = DiffService.Compare(baseline, compare);
+            baselineSchema = baseline;
+            targetSchema = compare;
+            crossDiffLabels = ($"snapshot @ {baseline.ExtractedAt:g}", $"snapshot @ {compare.ExtractedAt:g}");
         }
         catch (Exception ex) { errorMessage = $"Diff failed: {ex.Message}"; }
         finally { running = false; }
@@ -554,6 +740,7 @@
         errorMessage = null;
         diffResult = null;
         crossDiffLabels = null;
+        ResetScriptState();
 
         try
         {
@@ -565,6 +752,8 @@
             var compSchema = await SchemaLoader.LoadSchemaAsync(compConn.Id, compConn.Provider, forceRefresh: true);
 
             diffResult = DiffService.Compare(baseSchema, compSchema);
+            baselineSchema = baseSchema;
+            targetSchema = compSchema;
             crossDiffLabels = (
                 $"{(baseConn.Tag is not null ? $"[{baseConn.Tag}] " : "")}{baseConn.Name}",
                 $"{(compConn.Tag is not null ? $"[{compConn.Tag}] " : "")}{compConn.Name}"
@@ -572,5 +761,109 @@
         }
         catch (Exception ex) { errorMessage = $"Cross-database diff failed: {ex.Message}"; }
         finally { running = false; }
+    }
+
+    // ── Migration script actions ─────────────────────────────────────
+
+    private void ResetScriptState()
+    {
+        scriptPanelOpen = false;
+        migrationActions = [];
+        selectedActionIds = [];
+        generatedScript = null;
+        copyStatus = null;
+        baselineSchema = null;
+        targetSchema = null;
+    }
+
+    private void OpenScriptPanel()
+    {
+        if (baselineSchema is null || targetSchema is null || diffResult is null) return;
+        scriptPanelOpen = true;
+        RebuildActions();
+    }
+
+    private void CloseScriptPanel()
+    {
+        scriptPanelOpen = false;
+        generatedScript = null;
+        copyStatus = null;
+    }
+
+    private void SetDirection(ScriptDirection dir)
+    {
+        if (scriptDirection == dir) return;
+        scriptDirection = dir;
+        RebuildActions();
+        generatedScript = null;
+    }
+
+    private void RebuildActions()
+    {
+        if (baselineSchema is null || targetSchema is null || diffResult is null) return;
+
+        // The existing diffResult was computed as baseline→target. When user flips direction,
+        // we need to re-compute with swapped sides so added/removed semantics are correct.
+        var (src, dst) = scriptDirection == ScriptDirection.BaselineToTarget
+            ? (baselineSchema, targetSchema)   // apply to baseline to match target
+            : (targetSchema, baselineSchema);  // apply to target to match baseline
+
+        var directedDiff = DiffService.Compare(src, dst);
+        var dialect = MigrationScriptGenerator.DialectFor(src.Provider);
+        migrationActions = MigrationScriptGenerator.BuildActions(src, dst, directedDiff, dialect);
+        selectedActionIds = new HashSet<string>(migrationActions.Select(a => a.Id));
+    }
+
+    private void SelectAllActions()
+    {
+        selectedActionIds = new HashSet<string>(migrationActions.Select(a => a.Id));
+        generatedScript = null;
+    }
+
+    private void DeselectAllActions()
+    {
+        selectedActionIds.Clear();
+        generatedScript = null;
+    }
+
+    private void ToggleAction(string id, bool isChecked)
+    {
+        if (isChecked) selectedActionIds.Add(id);
+        else selectedActionIds.Remove(id);
+        generatedScript = null;
+    }
+
+    private void GenerateScript()
+    {
+        if (baselineSchema is null || targetSchema is null) return;
+        var (src, dst) = scriptDirection == ScriptDirection.BaselineToTarget
+            ? (baselineSchema, targetSchema)
+            : (targetSchema, baselineSchema);
+        var dialect = MigrationScriptGenerator.DialectFor(src.Provider);
+        var selected = migrationActions.Where(a => selectedActionIds.Contains(a.Id));
+        var srcLabel = scriptDirection == ScriptDirection.BaselineToTarget ? GetLabel(true) : GetLabel(false);
+        var dstLabel = scriptDirection == ScriptDirection.BaselineToTarget ? GetLabel(false) : GetLabel(true);
+        generatedScript = MigrationScriptGenerator.AssembleScript(selected, dialect, srcLabel, dstLabel);
+        copyStatus = null;
+    }
+
+    private async Task CopyScript()
+    {
+        if (string.IsNullOrEmpty(generatedScript)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", generatedScript);
+            copyStatus = "Copied!";
+            _ = InvokeAsync(async () => { await Task.Delay(2000); copyStatus = null; StateHasChanged(); });
+        }
+        catch { copyStatus = "Copy failed"; }
+    }
+
+    private async Task DownloadScript()
+    {
+        if (string.IsNullOrEmpty(generatedScript)) return;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(generatedScript);
+        var fileName = $"migration_{DateTime.Now:yyyyMMdd_HHmmss}.sql";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "text/plain", bytes);
     }
 }
