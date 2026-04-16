@@ -92,7 +92,19 @@ public class SqlServerDialect : ISqlDialect
         => $"ALTER TABLE {QuoteSchemaTable(table.Schema, table.Name)} ADD {RenderColumnDefinition(column)};";
 
     public string DropColumn(SchemaTable table, SchemaColumn column)
-        => $"ALTER TABLE {QuoteSchemaTable(table.Schema, table.Name)} DROP COLUMN {QuoteId(column.Name)};";
+    {
+        // SQL Server requires dropping any DEFAULT constraint on the column before DROP COLUMN.
+        // Use a dynamic lookup because we may not know the auto-generated constraint name.
+        var fullName = $"{table.Schema}.{table.Name}";
+        var sb = new StringBuilder();
+        sb.AppendLine("DECLARE @dc_name SYSNAME;");
+        sb.AppendLine("SELECT @dc_name = dc.name FROM sys.default_constraints dc");
+        sb.AppendLine("  JOIN sys.columns c ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id");
+        sb.AppendLine($"  WHERE dc.parent_object_id = OBJECT_ID('{fullName}') AND c.name = '{column.Name.Replace("'", "''")}';");
+        sb.AppendLine($"IF @dc_name IS NOT NULL EXEC('ALTER TABLE {QuoteSchemaTable(table.Schema, table.Name)} DROP CONSTRAINT [' + @dc_name + ']');");
+        sb.Append($"ALTER TABLE {QuoteSchemaTable(table.Schema, table.Name)} DROP COLUMN {QuoteId(column.Name)};");
+        return sb.ToString();
+    }
 
     public string AlterColumn(SchemaTable table, SchemaColumn baseline, SchemaColumn current)
     {

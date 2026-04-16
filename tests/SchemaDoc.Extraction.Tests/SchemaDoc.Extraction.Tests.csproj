@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SchemaDoc.Extraction\SchemaDoc.Extraction.csproj" />
+    <ProjectReference Include="..\..\src\SchemaDoc.Core\SchemaDoc.Core.csproj" />
   </ItemGroup>
 
 </Project>

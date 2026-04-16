@@ -137,7 +137,7 @@ public class SqlServerExtractor : ISchemaExtractor
                         Name: c.ColumnName,
                         OrdinalPosition: c.ColumnId,
                         DataType: c.DataType,
-                        MaxLength: c.MaxLength > 0 && c.MaxLength != -1 ? c.MaxLength.ToString() : (c.MaxLength == -1 ? "MAX" : null),
+                        MaxLength: NormalizeMaxLength(c.DataType, c.MaxLength),
                         NumericPrecision: c.NumericPrecision > 0 ? c.NumericPrecision : null,
                         NumericScale: c.NumericScale >= 0 ? c.NumericScale : null,
                         IsNullable: c.IsNullable,
@@ -157,6 +157,21 @@ public class SqlServerExtractor : ISchemaExtractor
             })
             .OrderBy(t => t.Schema).ThenBy(t => t.Name)
             .ToList();
+    }
+
+    /// <summary>
+    /// sys.columns.max_length reports BYTES. For unicode types (n-prefixed) divide by 2 to get chars.
+    /// Returns "MAX" for -1, null for 0, otherwise the char-length as string.
+    /// </summary>
+    private static string? NormalizeMaxLength(string dataType, short byteLength)
+    {
+        if (byteLength == -1) return "MAX";
+        if (byteLength <= 0) return null;
+
+        var t = dataType.ToLowerInvariant();
+        var isUnicode = t == "nvarchar" || t == "nchar" || t == "ntext";
+        var chars = isUnicode ? byteLength / 2 : byteLength;
+        return chars.ToString();
     }
 
     private static List<SchemaView> BuildViews(List<RawView> views)
