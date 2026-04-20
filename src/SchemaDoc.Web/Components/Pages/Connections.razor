@@ -110,8 +110,33 @@
                     </select>
                 </div>
 
-                <!-- SQL Server structured form -->
+                <!-- SQL Server: toggle between structured form and raw paste -->
                 @if (formProvider == DatabaseProvider.SqlServer)
+                {
+                    <div class="flex gap-1 bg-gray-100 dark:bg-gray-900 rounded-lg p-1 w-fit">
+                        <button type="button" @onclick="() => sqlUseRawString = false"
+                                class="px-3 py-1 rounded-md text-xs font-medium transition-colors @(!sqlUseRawString ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200")">
+                            Guided Form
+                        </button>
+                        <button type="button" @onclick="() => sqlUseRawString = true"
+                                class="px-3 py-1 rounded-md text-xs font-medium transition-colors @(sqlUseRawString ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200")">
+                            Paste Connection String
+                        </button>
+                    </div>
+                }
+
+                @if (formProvider == DatabaseProvider.SqlServer && sqlUseRawString)
+                {
+                    <!-- Raw connection string paste for SQL Server -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Connection String</label>
+                        <textarea @bind="formConnectionString" @bind:event="oninput" rows="4"
+                                  placeholder="Server=myserver.database.windows.net;Database=MyDb;Authentication=Active Directory Interactive;User Id=me@company.com;"
+                                  class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm font-mono bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300"></textarea>
+                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Paste any valid SQL Server connection string. Stored encrypted on your machine. Never sent anywhere.</p>
+                    </div>
+                }
+                else if (formProvider == DatabaseProvider.SqlServer)
                 {
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Server</label>
@@ -131,12 +156,28 @@
                                 class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-300">
                             <option value="SqlAuth">SQL Server Authentication</option>
                             <option value="WindowsAuth">Windows Authentication</option>
-                            <option value="AadPassword">Azure AD – Password</option>
-                            <option value="AadServicePrincipal">Azure AD – Service Principal</option>
-                            <option value="AadIntegrated">Azure AD – Integrated</option>
-                            <option value="AadDefault">Azure AD – Default / Managed Identity</option>
+                            <option value="AadInteractive">Microsoft Entra MFA (Interactive)</option>
+                            <option value="AadPassword">Microsoft Entra Password</option>
+                            <option value="AadServicePrincipal">Microsoft Entra Service Principal</option>
+                            <option value="AadIntegrated">Microsoft Entra Integrated</option>
+                            <option value="AadManagedIdentity">Microsoft Entra Managed Identity</option>
+                            <option value="AadDefault">Microsoft Entra Default</option>
                         </select>
                     </div>
+
+                    @if (sqlAuthMethod == "AadInteractive")
+                    {
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Username <span class="text-gray-400 font-normal">(optional — leave blank to prompt)</span></label>
+                            <input type="text" @bind="sqlUsername" @bind:event="oninput" placeholder="your.email@company.com"
+                                   class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                        </div>
+                        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2">
+                            <p class="text-xs text-blue-700 dark:text-blue-300">
+                                <strong>How it works:</strong> When you click <em>Save & Connect</em>, a browser window will open to complete Microsoft Entra (Azure AD) authentication, including MFA if enabled. The login happens on this machine.
+                            </p>
+                        </div>
+                    }
 
                     @if (sqlAuthMethod is "SqlAuth" or "AadPassword")
                     {
@@ -269,6 +310,7 @@
     private string sqlUsername = "";
     private string sqlPassword = "";
     private bool   sqlTrustCert = true;
+    private bool   sqlUseRawString; // true = paste mode, false = guided form
 
     // Tag fields
     private string? formTag;
@@ -304,13 +346,17 @@
     private string BuildSqlServerConnectionString()
     {
         var trust = sqlTrustCert ? "TrustServerCertificate=True;" : "";
+        // Interactive / MFA: include User Id only if provided (empty causes the login prompt to appear)
+        var interactiveUserPart = string.IsNullOrWhiteSpace(sqlUsername) ? "" : $"User Id={sqlUsername};";
         return sqlAuthMethod switch
         {
             "SqlAuth"            => $"Server={sqlServer};Database={sqlDatabase};User Id={sqlUsername};Password={sqlPassword};{trust}",
             "WindowsAuth"        => $"Server={sqlServer};Database={sqlDatabase};Integrated Security=True;{trust}",
+            "AadInteractive"     => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Interactive;{interactiveUserPart}{trust}",
             "AadPassword"        => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Password;User Id={sqlUsername};Password={sqlPassword};{trust}",
             "AadServicePrincipal"=> $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Service Principal;User Id={sqlUsername};Password={sqlPassword};{trust}",
             "AadIntegrated"      => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Integrated;{trust}",
+            "AadManagedIdentity" => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Managed Identity;{trust}",
             "AadDefault"         => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Default;{trust}",
             _                    => ""
         };
@@ -318,7 +364,7 @@
 
     private string GetEffectiveConnectionString() =>
         formProvider == DatabaseProvider.SqlServer
-            ? BuildSqlServerConnectionString()
+            ? (sqlUseRawString ? formConnectionString : BuildSqlServerConnectionString())
             : formConnectionString;
 
     protected override async Task OnInitializedAsync()
@@ -339,6 +385,7 @@
         sqlUsername   = "";
         sqlPassword   = "";
         sqlTrustCert  = true;
+        sqlUseRawString = false;
         formTag       = null;
         formTagColor  = "blue";
     }
