@@ -9,16 +9,9 @@ public class MySqlExtractor : ISchemaExtractor
 {
     public async Task<bool> TestConnectionAsync(string connectionString, CancellationToken ct = default)
     {
-        try
-        {
-            await using var conn = new MySqlConnection(connectionString);
-            await conn.OpenAsync(ct);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        await using var conn = new MySqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        return true;
     }
 
     public async Task<DatabaseSchema> ExtractAsync(string connectionString, CancellationToken ct = default)

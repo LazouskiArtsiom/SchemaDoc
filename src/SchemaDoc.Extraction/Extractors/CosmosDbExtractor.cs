@@ -8,17 +8,10 @@ public class CosmosDbExtractor : ISchemaExtractor
 {
     public async Task<bool> TestConnectionAsync(string connectionString, CancellationToken ct = default)
     {
-        try
-        {
-            using var client = CreateClient(connectionString);
-            var iter = client.GetDatabaseQueryIterator<DatabaseProperties>();
-            await iter.ReadNextAsync(ct);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        using var client = CreateClient(connectionString);
+        var iter = client.GetDatabaseQueryIterator<DatabaseProperties>();
+        await iter.ReadNextAsync(ct);
+        return true;
     }
 
     public async Task<DatabaseSchema> ExtractAsync(string connectionString, CancellationToken ct = default)

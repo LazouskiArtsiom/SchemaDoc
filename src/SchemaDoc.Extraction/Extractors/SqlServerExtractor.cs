@@ -9,16 +9,10 @@ public class SqlServerExtractor : ISchemaExtractor
 {
     public async Task<bool> TestConnectionAsync(string connectionString, CancellationToken ct = default)
     {
-        try
-        {
-            await using var conn = new SqlConnection(connectionString);
-            await conn.OpenAsync(ct);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        // Let exceptions propagate so the UI can show the real error (was previously swallowed).
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        return true;
     }
 
     public async Task<DatabaseSchema> ExtractAsync(string connectionString, CancellationToken ct = default)

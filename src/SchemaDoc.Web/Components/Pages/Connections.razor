@@ -172,9 +172,12 @@
                             <input type="text" @bind="sqlUsername" @bind:event="oninput" placeholder="your.email@company.com"
                                    class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
                         </div>
-                        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2">
+                        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 space-y-1">
                             <p class="text-xs text-blue-700 dark:text-blue-300">
-                                <strong>How it works:</strong> When you click <em>Save & Connect</em>, a browser window will open to complete Microsoft Entra (Azure AD) authentication, including MFA if enabled. The login happens on this machine.
+                                <strong>How it works:</strong> A browser popup opens to complete Microsoft Entra sign-in (including MFA) when you click <em>Save & Connect</em>. You have 3 minutes to complete it.
+                            </p>
+                            <p class="text-xs text-amber-700 dark:text-amber-400">
+                                <strong>If it fails or times out:</strong> open a terminal, run <code class="bg-amber-100 dark:bg-amber-900/40 px-1 rounded">az login</code>, then switch the auth method above to <strong>Microsoft Entra Default</strong>. No popup needed — it uses your cached Azure CLI token.
                             </p>
                         </div>
                     }
@@ -348,16 +351,18 @@
         var trust = sqlTrustCert ? "TrustServerCertificate=True;" : "";
         // Interactive / MFA: include User Id only if provided (empty causes the login prompt to appear)
         var interactiveUserPart = string.IsNullOrWhiteSpace(sqlUsername) ? "" : $"User Id={sqlUsername};";
+        // Give the user 3 minutes to complete MFA in the browser popup (default is 15 seconds)
+        const string interactiveTimeout = "Connect Timeout=180;";
         return sqlAuthMethod switch
         {
             "SqlAuth"            => $"Server={sqlServer};Database={sqlDatabase};User Id={sqlUsername};Password={sqlPassword};{trust}",
             "WindowsAuth"        => $"Server={sqlServer};Database={sqlDatabase};Integrated Security=True;{trust}",
-            "AadInteractive"     => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Interactive;{interactiveUserPart}{trust}",
+            "AadInteractive"     => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Interactive;{interactiveUserPart}{interactiveTimeout}{trust}",
             "AadPassword"        => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Password;User Id={sqlUsername};Password={sqlPassword};{trust}",
             "AadServicePrincipal"=> $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Service Principal;User Id={sqlUsername};Password={sqlPassword};{trust}",
             "AadIntegrated"      => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Integrated;{trust}",
             "AadManagedIdentity" => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Managed Identity;{trust}",
-            "AadDefault"         => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Default;{trust}",
+            "AadDefault"         => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Default;{interactiveTimeout}{trust}",
             _                    => ""
         };
     }
@@ -405,12 +410,7 @@
 
         try
         {
-            var ok = await SchemaLoader.TestConnectionAsync(formProvider, cs);
-            if (!ok)
-            {
-                errorMessage = "Could not connect. Please check your settings.";
-                return;
-            }
+            await SchemaLoader.TestConnectionAsync(formProvider, cs);
 
             var tag = string.IsNullOrWhiteSpace(formTag) ? null : formTag.Trim();
             var id = await ConnectionRepo.AddAsync(formName, formProvider, cs, tag, tag is not null ? formTagColor : null);
@@ -422,7 +422,11 @@
         }
         catch (Exception ex)
         {
-            errorMessage = ex.Message;
+            // Flatten chained exceptions so MSAL / SqlClient inner details are visible
+            var messages = new List<string>();
+            for (var e = ex; e is not null; e = e.InnerException)
+                messages.Add(e.Message);
+            errorMessage = string.Join(" → ", messages.Distinct());
         }
         finally
         {
