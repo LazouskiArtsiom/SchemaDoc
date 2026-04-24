@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using SchemaDoc.Core.Interfaces;
 using SchemaDoc.Core.Services;
@@ -8,6 +9,22 @@ using SchemaDoc.Infrastructure.Repositories;
 using SchemaDoc.Web.Components;
 using SchemaDoc.Export;
 using SchemaDoc.Web.Services;
+
+// Register Azure AD (Microsoft Entra) authentication providers explicitly.
+// The Microsoft.Data.SqlClient.Extensions.Azure package registers these via a
+// module initializer, but that can be trimmed out in single-file self-contained
+// publishes. Registering here guarantees MFA, Managed Identity, Default, etc.
+// all work after publish.
+var entraProvider = new ActiveDirectoryAuthenticationProvider();
+SqlAuthenticationProvider.SetProvider(SqlAuthenticationMethod.ActiveDirectoryInteractive,       entraProvider);
+#pragma warning disable CS0618 // ActiveDirectoryPassword is deprecated but still widely used in legacy tools.
+SqlAuthenticationProvider.SetProvider(SqlAuthenticationMethod.ActiveDirectoryPassword,          entraProvider);
+#pragma warning restore CS0618
+SqlAuthenticationProvider.SetProvider(SqlAuthenticationMethod.ActiveDirectoryIntegrated,        entraProvider);
+SqlAuthenticationProvider.SetProvider(SqlAuthenticationMethod.ActiveDirectoryServicePrincipal,  entraProvider);
+SqlAuthenticationProvider.SetProvider(SqlAuthenticationMethod.ActiveDirectoryManagedIdentity,   entraProvider);
+SqlAuthenticationProvider.SetProvider(SqlAuthenticationMethod.ActiveDirectoryDefault,           entraProvider);
+SqlAuthenticationProvider.SetProvider(SqlAuthenticationMethod.ActiveDirectoryDeviceCodeFlow,    entraProvider);
 
 var builder = WebApplication.CreateBuilder(args);
 
