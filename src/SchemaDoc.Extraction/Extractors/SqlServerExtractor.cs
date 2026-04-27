@@ -15,6 +15,39 @@ public class SqlServerExtractor : ISchemaExtractor
         return true;
     }
 
+    public async Task<IReadOnlyList<string>> ListDatabasesAsync(string connectionString, CancellationToken ct = default)
+    {
+        // Connect to master so we can enumerate databases regardless of the original Initial Catalog.
+        var rerouted = SwitchDatabase(connectionString, "master");
+        try
+        {
+            await using var conn = new SqlConnection(rerouted);
+            await conn.OpenAsync(ct);
+            // Skip system DBs but always include the originally targeted DB if it's accessible.
+            var dbs = (await conn.QueryAsync<string>(
+                """
+                SELECT name FROM sys.databases
+                WHERE database_id > 4   -- master, tempdb, model, msdb
+                  AND state = 0          -- ONLINE
+                  AND HAS_DBACCESS(name) = 1
+                ORDER BY name
+                """)).ToList();
+            return dbs;
+        }
+        catch
+        {
+            // User may not have permission to query master — fall back to whatever DB they targeted.
+            var builder = new SqlConnectionStringBuilder(connectionString);
+            return string.IsNullOrEmpty(builder.InitialCatalog) ? [] : [builder.InitialCatalog];
+        }
+    }
+
+    public string SwitchDatabase(string connectionString, string databaseName)
+    {
+        var builder = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = databaseName };
+        return builder.ConnectionString;
+    }
+
     public async Task<DatabaseSchema> ExtractAsync(string connectionString, CancellationToken ct = default)
     {
         await using var conn = new SqlConnection(connectionString);

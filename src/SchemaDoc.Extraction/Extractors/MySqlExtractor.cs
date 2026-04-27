@@ -14,6 +14,35 @@ public class MySqlExtractor : ISchemaExtractor
         return true;
     }
 
+    public async Task<IReadOnlyList<string>> ListDatabasesAsync(string connectionString, CancellationToken ct = default)
+    {
+        // MySQL: schema = database. Connect without a default database first.
+        var builder = new MySqlConnectionStringBuilder(connectionString) { Database = "" };
+        try
+        {
+            await using var conn = new MySqlConnection(builder.ConnectionString);
+            await conn.OpenAsync(ct);
+            var dbs = (await conn.QueryAsync<string>(
+                """
+                SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA
+                WHERE SCHEMA_NAME NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+                ORDER BY SCHEMA_NAME
+                """)).ToList();
+            return dbs;
+        }
+        catch
+        {
+            var orig = new MySqlConnectionStringBuilder(connectionString);
+            return string.IsNullOrEmpty(orig.Database) ? [] : [orig.Database];
+        }
+    }
+
+    public string SwitchDatabase(string connectionString, string databaseName)
+    {
+        var builder = new MySqlConnectionStringBuilder(connectionString) { Database = databaseName };
+        return builder.ConnectionString;
+    }
+
     public async Task<DatabaseSchema> ExtractAsync(string connectionString, CancellationToken ct = default)
     {
         await using var conn = new MySqlConnection(connectionString);

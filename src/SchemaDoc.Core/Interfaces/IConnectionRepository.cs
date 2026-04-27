@@ -11,4 +11,9 @@ public interface IConnectionRepository
     Task UpdateTagAsync(int id, string? tag, string? tagColor);
     Task DeleteAsync(int id);
     Task TouchLastConnectedAsync(int id, string databaseName);
+
+    // ── Per-database tag overrides ──────────────────────────────
+    Task<IReadOnlyDictionary<string, (string? Tag, string? TagColor)>> GetDatabaseTagsAsync(int connectionId);
+    Task UpsertDatabaseTagAsync(int connectionId, string databaseName, string? tag, string? tagColor);
+    Task ClearDatabaseTagAsync(int connectionId, string databaseName);
 }

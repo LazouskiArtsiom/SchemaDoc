@@ -99,25 +99,49 @@
         {
             <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 mb-6">
                 <div class="grid grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Baseline (e.g. Production)</label>
-                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100" @bind="baselineConnId">
+                    <div class="space-y-2">
+                        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Baseline (e.g. Production)</label>
+                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                                @onchange="@(async e => await OnBaselineConnChanged(int.Parse(e.Value!.ToString()!)))">
                             @foreach (var conn in allConnections)
                             {
-                                <option value="@conn.Id">
+                                <option value="@conn.Id" selected="@(conn.Id == baselineConnId)">
                                     @if (!string.IsNullOrEmpty(conn.Tag)) { @($"[{conn.Tag}] ") }@conn.Name
                                 </option>
                             }
                         </select>
+                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                                @bind="baselineDb" disabled="@(baselineDbList.Count == 0)">
+                            @if (baselineDbList.Count == 0)
+                            {
+                                <option value="">@(loadingBaselineDbs ? "Loading databases..." : "(no databases listed)")</option>
+                            }
+                            @foreach (var db in baselineDbList)
+                            {
+                                <option value="@db">@db</option>
+                            }
+                        </select>
                     </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Compare To (e.g. Dev)</label>
-                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100" @bind="compareConnId">
+                    <div class="space-y-2">
+                        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Compare To (e.g. Dev)</label>
+                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                                @onchange="@(async e => await OnCompareConnChanged(int.Parse(e.Value!.ToString()!)))">
                             @foreach (var conn in allConnections)
                             {
-                                <option value="@conn.Id">
+                                <option value="@conn.Id" selected="@(conn.Id == compareConnId)">
                                     @if (!string.IsNullOrEmpty(conn.Tag)) { @($"[{conn.Tag}] ") }@conn.Name
                                 </option>
+                            }
+                        </select>
+                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                                @bind="compareDb" disabled="@(compareDbList.Count == 0)">
+                            @if (compareDbList.Count == 0)
+                            {
+                                <option value="">@(loadingCompareDbs ? "Loading databases..." : "(no databases listed)")</option>
+                            }
+                            @foreach (var db in compareDbList)
+                            {
+                                <option value="@db">@db</option>
                             }
                         </select>
                     </div>
@@ -637,6 +661,12 @@
     private List<ConnectionProfile> allConnections = [];
     private int baselineConnId;
     private int compareConnId;
+    private string baselineDb = "";
+    private string compareDb = "";
+    private List<string> baselineDbList = [];
+    private List<string> compareDbList = [];
+    private bool loadingBaselineDbs;
+    private bool loadingCompareDbs;
     private (string Baseline, string Compare)? crossDiffLabels;
 
     // Shared state
@@ -678,6 +708,8 @@
         {
             baselineConnId = allConnections[0].Id;
             compareConnId = allConnections[1].Id;
+            await LoadBaselineDbsAsync();
+            await LoadCompareDbsAsync();
         }
 
         if (SessionState.ActiveConnection is not null && SessionState.CurrentSchema is not null)
@@ -747,16 +779,22 @@
             var baseConn = allConnections.First(c => c.Id == baselineConnId);
             var compConn = allConnections.First(c => c.Id == compareConnId);
 
-            // Extract both schemas live
-            var baseSchema = await SchemaLoader.LoadSchemaAsync(baseConn.Id, baseConn.Provider, forceRefresh: true);
-            var compSchema = await SchemaLoader.LoadSchemaAsync(compConn.Id, compConn.Provider, forceRefresh: true);
+            if (string.IsNullOrEmpty(baselineDb) || string.IsNullOrEmpty(compareDb))
+            {
+                errorMessage = "Pick a database for both sides.";
+                return;
+            }
+
+            // Extract both schemas live, targeting the selected DBs
+            var baseSchema = await SchemaLoader.LoadSchemaAsync(baseConn.Id, baseConn.Provider, baselineDb, forceRefresh: true);
+            var compSchema = await SchemaLoader.LoadSchemaAsync(compConn.Id, compConn.Provider, compareDb, forceRefresh: true);
 
             diffResult = DiffService.Compare(baseSchema, compSchema);
             baselineSchema = baseSchema;
             targetSchema = compSchema;
             crossDiffLabels = (
-                $"{(baseConn.Tag is not null ? $"[{baseConn.Tag}] " : "")}{baseConn.Name}",
-                $"{(compConn.Tag is not null ? $"[{compConn.Tag}] " : "")}{compConn.Name}"
+                $"{(baseConn.Tag is not null ? $"[{baseConn.Tag}] " : "")}{baseConn.Name} · {baselineDb}",
+                $"{(compConn.Tag is not null ? $"[{compConn.Tag}] " : "")}{compConn.Name} · {compareDb}"
             );
         }
         catch (Exception ex) { errorMessage = $"Cross-database diff failed: {ex.Message}"; }
@@ -865,5 +903,73 @@
         var bytes = System.Text.Encoding.UTF8.GetBytes(generatedScript);
         var fileName = $"migration_{DateTime.Now:yyyyMMdd_HHmmss}.sql";
         await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "text/plain", bytes);
+    }
+
+    private async Task OnBaselineConnChanged(int newId)
+    {
+        baselineConnId = newId;
+        baselineDb = "";
+        baselineDbList = [];
+        await LoadBaselineDbsAsync();
+    }
+
+    private async Task OnCompareConnChanged(int newId)
+    {
+        compareConnId = newId;
+        compareDb = "";
+        compareDbList = [];
+        await LoadCompareDbsAsync();
+    }
+
+    private async Task LoadBaselineDbsAsync()
+    {
+        if (baselineConnId == 0) return;
+        var conn = allConnections.FirstOrDefault(c => c.Id == baselineConnId);
+        if (conn is null) return;
+
+        loadingBaselineDbs = true;
+        StateHasChanged();
+        try
+        {
+            var dbs = await SchemaLoader.ListDatabasesAsync(conn.Id, conn.Provider);
+            baselineDbList = dbs.ToList();
+            baselineDb = baselineDbList.FirstOrDefault(d => d.Equals(conn.LastDatabaseName, StringComparison.OrdinalIgnoreCase))
+                         ?? baselineDbList.FirstOrDefault() ?? "";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not list databases for {conn.Name}: {ex.Message}";
+        }
+        finally
+        {
+            loadingBaselineDbs = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadCompareDbsAsync()
+    {
+        if (compareConnId == 0) return;
+        var conn = allConnections.FirstOrDefault(c => c.Id == compareConnId);
+        if (conn is null) return;
+
+        loadingCompareDbs = true;
+        StateHasChanged();
+        try
+        {
+            var dbs = await SchemaLoader.ListDatabasesAsync(conn.Id, conn.Provider);
+            compareDbList = dbs.ToList();
+            compareDb = compareDbList.FirstOrDefault(d => d.Equals(conn.LastDatabaseName, StringComparison.OrdinalIgnoreCase))
+                        ?? compareDbList.FirstOrDefault() ?? "";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not list databases for {conn.Name}: {ex.Message}";
+        }
+        finally
+        {
+            loadingCompareDbs = false;
+            StateHasChanged();
+        }
     }
 }

@@ -10,7 +10,12 @@ public class SavedConnection
     public string EncryptedConnectionString { get; set; } = "";
     public DateTime LastConnectedAt { get; set; }
     public string? LastDatabaseName { get; set; }
-    public string? Tag { get; set; }
+    /// <summary>
+    /// Tag used for environment labelling (Dev/Staging/Prod/...). Stored as empty
+    /// string when no tag is set so that the unique index on (Name, Tag) treats
+    /// untagged connections deterministically.
+    /// </summary>
+    public string Tag { get; set; } = "";
     public string? TagColor { get; set; }
 
     public ICollection<SchemaSnapshot> Snapshots { get; set; } = [];
@@ -48,4 +53,18 @@ public class SchemaSnapshot
     public string DatabaseName { get; set; } = "";
     public DateTime ExtractedAt { get; set; }
     public string SchemaJson { get; set; } = "";
+}
+
+/// <summary>
+/// Per-database tag override under a server connection. Lets users mark e.g.
+/// the `Bookstore_QA` DB on a shared server with a "QA" tag separately from
+/// the server's default tag.
+/// </summary>
+public class DatabaseTag
+{
+    public int Id { get; set; }
+    public int ConnectionId { get; set; }
+    public string DatabaseName { get; set; } = "";
+    public string? Tag { get; set; }
+    public string? TagColor { get; set; }
 }

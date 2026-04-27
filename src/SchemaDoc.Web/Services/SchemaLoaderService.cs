@@ -18,23 +18,41 @@ public class SchemaLoaderService(
         return await extractor.TestConnectionAsync(connectionString);
     }
 
-    public async Task<DatabaseSchema> LoadSchemaAsync(int connectionId, DatabaseProvider provider, bool forceRefresh = false)
+    public async Task<IReadOnlyList<string>> ListDatabasesAsync(int connectionId, DatabaseProvider provider)
+    {
+        var connStr = await connectionRepo.GetConnectionStringAsync(connectionId)
+            ?? throw new InvalidOperationException("Connection not found.");
+        var extractor = extractorFactory.GetExtractor(provider);
+        return await extractor.ListDatabasesAsync(connStr);
+    }
+
+    /// <summary>
+    /// Loads schema for a specific database under a server connection.
+    /// If <paramref name="databaseName"/> is null, falls back to the database
+    /// embedded in the saved connection string (legacy single-DB mode).
+    /// </summary>
+    public async Task<DatabaseSchema> LoadSchemaAsync(int connectionId, DatabaseProvider provider, string? databaseName = null, bool forceRefresh = false)
     {
         var connStr = await connectionRepo.GetConnectionStringAsync(connectionId)
             ?? throw new InvalidOperationException("Connection not found.");
 
+        var extractor = extractorFactory.GetExtractor(provider);
+
+        // Reroute the connection string to the requested database (no-op for Cosmos).
+        var effectiveCs = string.IsNullOrEmpty(databaseName)
+            ? connStr
+            : extractor.SwitchDatabase(connStr, databaseName);
+        var effectiveDb = databaseName ?? await GetDatabaseNameAsync(provider, connStr);
+
         if (!forceRefresh)
         {
-            var dbName = await GetDatabaseNameAsync(provider, connStr);
-            var cached = await snapshotRepo.GetLatestAsync(connectionId, dbName);
+            var cached = await snapshotRepo.GetLatestAsync(connectionId, effectiveDb);
             if (cached is not null)
                 return cached;
         }
 
-        var extractor = extractorFactory.GetExtractor(provider);
-        var schema = await extractor.ExtractAsync(connStr);
+        var schema = await extractor.ExtractAsync(effectiveCs);
         await snapshotRepo.SaveAsync(connectionId, schema);
-
         return schema;
     }
 

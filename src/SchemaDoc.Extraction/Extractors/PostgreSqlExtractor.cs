@@ -14,6 +14,37 @@ public class PostgreSqlExtractor : ISchemaExtractor
         return true;
     }
 
+    public async Task<IReadOnlyList<string>> ListDatabasesAsync(string connectionString, CancellationToken ct = default)
+    {
+        // Connect to "postgres" admin DB which is usually accessible to any user.
+        var rerouted = SwitchDatabase(connectionString, "postgres");
+        try
+        {
+            await using var conn = new NpgsqlConnection(rerouted);
+            await conn.OpenAsync(ct);
+            var dbs = (await conn.QueryAsync<string>(
+                """
+                SELECT datname FROM pg_database
+                WHERE datistemplate = false
+                  AND datallowconn = true
+                  AND has_database_privilege(datname, 'CONNECT')
+                ORDER BY datname
+                """)).ToList();
+            return dbs;
+        }
+        catch
+        {
+            var builder = new NpgsqlConnectionStringBuilder(connectionString);
+            return string.IsNullOrEmpty(builder.Database) ? [] : [builder.Database];
+        }
+    }
+
+    public string SwitchDatabase(string connectionString, string databaseName)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(connectionString) { Database = databaseName };
+        return builder.ConnectionString;
+    }
+
     public async Task<DatabaseSchema> ExtractAsync(string connectionString, CancellationToken ct = default)
     {
         await using var conn = new NpgsqlConnection(connectionString);

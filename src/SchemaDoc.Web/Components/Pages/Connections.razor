@@ -436,23 +436,39 @@
 
     private async Task ConnectAsync(ConnectionProfile conn)
     {
-        var cached = State.GetCachedSchema(conn.Id);
-        if (cached is not null)
-        {
-            State.SetActiveConnection(conn, cached);
-            Nav.NavigateTo("/");
-            return;
-        }
-
         loading = true;
         loadingId = conn.Id;
         errorMessage = null;
 
         try
         {
-            var schema = await SchemaLoader.LoadSchemaAsync(conn.Id, conn.Provider, forceRefresh: false);
-            State.SetActiveConnection(conn, schema);
-            await ConnectionRepo.TouchLastConnectedAsync(conn.Id, schema.DatabaseName);
+            // Discover all databases on this server
+            var databases = await SchemaLoader.ListDatabasesAsync(conn.Id, conn.Provider);
+            State.CacheDatabaseList(conn.Id, databases);
+
+            // Pick a default DB to load: prefer LastDatabaseName if it still exists, else first
+            var defaultDb = databases.FirstOrDefault(d =>
+                                d.Equals(conn.LastDatabaseName, StringComparison.OrdinalIgnoreCase))
+                            ?? databases.FirstOrDefault();
+
+            if (defaultDb is null)
+            {
+                // No accessible databases — still navigate home, sidebar will show the server with no DBs
+                Nav.NavigateTo("/");
+                return;
+            }
+
+            var cached = State.GetCachedSchema(conn.Id, defaultDb);
+            if (cached is not null)
+            {
+                State.SetActiveDatabase(conn, defaultDb, cached);
+                Nav.NavigateTo("/");
+                return;
+            }
+
+            var schema = await SchemaLoader.LoadSchemaAsync(conn.Id, conn.Provider, defaultDb, forceRefresh: false);
+            State.SetActiveDatabase(conn, defaultDb, schema);
+            await ConnectionRepo.TouchLastConnectedAsync(conn.Id, defaultDb);
             Nav.NavigateTo("/");
         }
         catch (Exception ex)

@@ -14,6 +14,27 @@ public class CosmosDbExtractor : ISchemaExtractor
         return true;
     }
 
+    public async Task<IReadOnlyList<string>> ListDatabasesAsync(string connectionString, CancellationToken ct = default)
+    {
+        using var client = CreateClient(connectionString);
+        var dbs = new List<string>();
+        var iter = client.GetDatabaseQueryIterator<DatabaseProperties>();
+        while (iter.HasMoreResults)
+        {
+            var page = await iter.ReadNextAsync(ct);
+            foreach (var d in page) dbs.Add(d.Id);
+        }
+        dbs.Sort();
+        return dbs;
+    }
+
+    public string SwitchDatabase(string connectionString, string databaseName)
+    {
+        // Cosmos connection strings don't carry a single "database" — the account hosts many.
+        // For Cosmos we keep the original connection string; database selection happens at query time.
+        return connectionString;
+    }
+
     public async Task<DatabaseSchema> ExtractAsync(string connectionString, CancellationToken ct = default)
     {
         using var client = CreateClient(connectionString);
