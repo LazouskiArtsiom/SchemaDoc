@@ -34,7 +34,7 @@
                     <span class="@TagColorClass(State.ActiveDbTagColor) text-xs px-2 py-0.5 rounded-full font-semibold">@State.ActiveDbTag</span>
                 }
                 <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100">@State.CurrentSchema.DatabaseName</h1>
-                <button @onclick="() => showTagEditor = !showTagEditor"
+                <button @onclick="ToggleTagEditor"
                         class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
                         title="Edit database tag">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -82,7 +82,7 @@
                                 Clear override (use server tag)
                             </button>
                         }
-                        <button @onclick="() => showTagEditor = false"
+                        <button @onclick="@(() => { showTagEditor = false; editorOwnerDb = null; })"
                                 class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 ml-auto">
                             Close
                         </button>
@@ -170,6 +170,8 @@
     private string? editTag;
     private string editColor = "blue";
     private bool hasTagOverride;
+    // Tracks which DB the editor was opened for, so we can close it when the user switches DBs
+    private string? editorOwnerDb;
 
     private static readonly (string Name, string Bg)[] tagColorOptions =
     [
@@ -206,9 +208,22 @@
 
     private void OnStateChanged() => InvokeAsync(async () =>
     {
+        // If the user switched to a different database, close the tag editor —
+        // its bound fields belonged to the old database.
+        if (showTagEditor && editorOwnerDb != State.ActiveDatabase)
+        {
+            showTagEditor = false;
+            editorOwnerDb = null;
+        }
         await LoadTagOverrideAsync();
         StateHasChanged();
     });
+
+    private void ToggleTagEditor()
+    {
+        showTagEditor = !showTagEditor;
+        editorOwnerDb = showTagEditor ? State.ActiveDatabase : null;
+    }
 
     private async Task LoadTagOverrideAsync()
     {
@@ -243,6 +258,7 @@
         State.SetActiveDatabase(State.ActiveConnection, State.ActiveDatabase, State.CurrentSchema!,
             tag, tag is not null ? editColor : null);
         showTagEditor = false;
+        editorOwnerDb = null;
         await LoadTagOverrideAsync();
     }
 
