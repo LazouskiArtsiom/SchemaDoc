@@ -144,11 +144,8 @@
                                class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
                     </div>
 
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Database</label>
-                        <input type="text" @bind="sqlDatabase" @bind:event="oninput" placeholder="e.g. MyDatabase"
-                               class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                    </div>
+                    @* No Database field: a connection is always a server.
+                       The sidebar lets the user pick which database to load after they connect. *@
 
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Authentication</label>
@@ -349,20 +346,23 @@
     private string BuildSqlServerConnectionString()
     {
         var trust = sqlTrustCert ? "TrustServerCertificate=True;" : "";
+        // Database is optional — if blank, omit it so SqlClient connects to the user's default DB.
+        // The sidebar will then enumerate all databases via ListDatabasesAsync.
+        var dbPart = string.IsNullOrWhiteSpace(sqlDatabase) ? "" : $"Database={sqlDatabase};";
         // Interactive / MFA: include User Id only if provided (empty causes the login prompt to appear)
         var interactiveUserPart = string.IsNullOrWhiteSpace(sqlUsername) ? "" : $"User Id={sqlUsername};";
         // Give the user 3 minutes to complete MFA in the browser popup (default is 15 seconds)
         const string interactiveTimeout = "Connect Timeout=180;";
         return sqlAuthMethod switch
         {
-            "SqlAuth"            => $"Server={sqlServer};Database={sqlDatabase};User Id={sqlUsername};Password={sqlPassword};{trust}",
-            "WindowsAuth"        => $"Server={sqlServer};Database={sqlDatabase};Integrated Security=True;{trust}",
-            "AadInteractive"     => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Interactive;{interactiveUserPart}{interactiveTimeout}{trust}",
-            "AadPassword"        => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Password;User Id={sqlUsername};Password={sqlPassword};{trust}",
-            "AadServicePrincipal"=> $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Service Principal;User Id={sqlUsername};Password={sqlPassword};{trust}",
-            "AadIntegrated"      => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Integrated;{trust}",
-            "AadManagedIdentity" => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Managed Identity;{trust}",
-            "AadDefault"         => $"Server={sqlServer};Database={sqlDatabase};Authentication=Active Directory Default;{interactiveTimeout}{trust}",
+            "SqlAuth"            => $"Server={sqlServer};{dbPart}User Id={sqlUsername};Password={sqlPassword};{trust}",
+            "WindowsAuth"        => $"Server={sqlServer};{dbPart}Integrated Security=True;{trust}",
+            "AadInteractive"     => $"Server={sqlServer};{dbPart}Authentication=Active Directory Interactive;{interactiveUserPart}{interactiveTimeout}{trust}",
+            "AadPassword"        => $"Server={sqlServer};{dbPart}Authentication=Active Directory Password;User Id={sqlUsername};Password={sqlPassword};{trust}",
+            "AadServicePrincipal"=> $"Server={sqlServer};{dbPart}Authentication=Active Directory Service Principal;User Id={sqlUsername};Password={sqlPassword};{trust}",
+            "AadIntegrated"      => $"Server={sqlServer};{dbPart}Authentication=Active Directory Integrated;{trust}",
+            "AadManagedIdentity" => $"Server={sqlServer};{dbPart}Authentication=Active Directory Managed Identity;{trust}",
+            "AadDefault"         => $"Server={sqlServer};{dbPart}Authentication=Active Directory Default;{interactiveTimeout}{trust}",
             _                    => ""
         };
     }
