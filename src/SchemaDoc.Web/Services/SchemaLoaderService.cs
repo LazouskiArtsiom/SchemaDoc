@@ -5,12 +5,12 @@ using SchemaDoc.Extraction;
 namespace SchemaDoc.Web.Services;
 
 /// <summary>
-/// Orchestrates loading a schema: checks snapshot cache first, falls back to live extraction.
+/// Orchestrates loading a schema by live extraction. Persisted snapshots are user-managed
+/// artifacts (created via Save Snapshot) and are not used as a transparent read-through cache.
 /// </summary>
 public class SchemaLoaderService(
     ExtractorFactory extractorFactory,
-    IConnectionRepository connectionRepo,
-    ISchemaSnapshotRepository snapshotRepo)
+    IConnectionRepository connectionRepo)
 {
     public async Task<bool> TestConnectionAsync(DatabaseProvider provider, string connectionString)
     {
@@ -27,12 +27,14 @@ public class SchemaLoaderService(
     }
 
     /// <summary>
-    /// Loads schema for a specific database under a server connection.
-    /// If <paramref name="databaseName"/> is null, falls back to the database
-    /// embedded in the saved connection string (legacy single-DB mode).
+    /// Loads schema for a specific database under a server connection. Always extracts live
+    /// — snapshots are now user-managed artifacts (see <c>Save Snapshot</c>) and not used as
+    /// a transparent cache. Session-level in-memory caching is the responsibility of
+    /// <c>SchemaSessionState</c>; this service does not persist anything to the DB.
     /// </summary>
     public async Task<DatabaseSchema> LoadSchemaAsync(int connectionId, DatabaseProvider provider, string? databaseName = null, bool forceRefresh = false)
     {
+        _ = forceRefresh; // kept for source compat; behaviour is always "live extract"
         var connStr = await connectionRepo.GetConnectionStringAsync(connectionId)
             ?? throw new InvalidOperationException("Connection not found.");
 
@@ -42,18 +44,8 @@ public class SchemaLoaderService(
         var effectiveCs = string.IsNullOrEmpty(databaseName)
             ? connStr
             : extractor.SwitchDatabase(connStr, databaseName);
-        var effectiveDb = databaseName ?? await GetDatabaseNameAsync(provider, connStr);
 
-        if (!forceRefresh)
-        {
-            var cached = await snapshotRepo.GetLatestAsync(connectionId, effectiveDb);
-            if (cached is not null)
-                return cached;
-        }
-
-        var schema = await extractor.ExtractAsync(effectiveCs);
-        await snapshotRepo.SaveAsync(connectionId, schema);
-        return schema;
+        return await extractor.ExtractAsync(effectiveCs);
     }
 
     private async Task<string> GetDatabaseNameAsync(DatabaseProvider provider, string connectionString)

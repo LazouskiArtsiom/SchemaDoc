@@ -4,159 +4,131 @@
 @inject SchemaDoc.Web.Services.SchemaSessionState SessionState
 @inject ISchemaSnapshotRepository SnapshotRepo
 @inject IConnectionRepository ConnectionRepo
-@inject SchemaDoc.Web.Services.SchemaLoaderService SchemaLoader
 @inject SchemaDoc.Core.Services.SchemaDiffService DiffService
+@inject NavigationManager Nav
 @inject IJSRuntime JS
 
 <PageTitle>Schema Diff - SchemaDoc</PageTitle>
 
 <div class="p-8 max-w-4xl mx-auto">
     <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Schema Diff</h1>
-    <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Compare schemas to see what's different.</p>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+        Compare any two snapshots — same database over time, or different databases (even on different networks).
+    </p>
 
-    <!-- Mode tabs -->
-    <div class="flex gap-1 mb-6 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
-        <button @onclick="() => mode = DiffMode.Snapshot"
-                class="px-4 py-1.5 rounded-md text-sm font-medium transition-colors @(mode == DiffMode.Snapshot ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200")">
-            Snapshot Diff
-        </button>
-        <button @onclick="() => mode = DiffMode.CrossDatabase"
-                class="px-4 py-1.5 rounded-md text-sm font-medium transition-colors @(mode == DiffMode.CrossDatabase ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200")">
-            Cross-Database
-        </button>
-    </div>
-
-    @if (mode == DiffMode.Snapshot)
+    @if (allSnapshots.Count < 2)
     {
-        @* ── Snapshot Diff ──────────────────────────────────────── *@
-        @if (SessionState.CurrentSchema is null || SessionState.ActiveConnection is null)
-        {
-            <div class="text-center py-16 text-gray-400">
-                <div class="text-5xl mb-4">🔀</div>
-                <p class="text-lg mb-2">No schema loaded</p>
-                <p class="text-sm">Connect to a database first from the
-                    <a href="/connections" class="text-blue-500 hover:underline">Connections</a> page.
-                </p>
-            </div>
-        }
-        else if (snapshots.Count < 2)
-        {
-            <div class="text-center py-16 text-gray-400">
-                <div class="text-5xl mb-4">📸</div>
-                <p class="text-lg mb-2">Not enough snapshots</p>
-                <p class="text-sm max-w-sm mx-auto">
-                    Schema Diff needs at least 2 snapshots. Use <strong>Refresh Schema</strong> on the home page to capture a new snapshot after making changes.
-                </p>
-                <p class="mt-2 text-xs text-gray-400 dark:text-gray-500">Currently @snapshots.Count snapshot(s) stored.</p>
-            </div>
-        }
-        else
-        {
-            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 mb-6">
-                <div class="grid grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Baseline (older)</label>
-                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100" @bind="baselineId">
-                            @foreach (var snap in snapshots)
-                            {
-                                <option value="@snap.Id">@snap.ExtractedAt.ToLocalTime().ToString("g")</option>
-                            }
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Compare To (newer)</label>
-                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100" @bind="compareId">
-                            @foreach (var snap in snapshots)
-                            {
-                                <option value="@snap.Id">@snap.ExtractedAt.ToLocalTime().ToString("g")</option>
-                            }
-                        </select>
-                    </div>
-                </div>
-                <div class="mt-4">
-                    <button class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                            @onclick="RunSnapshotDiff" disabled="@running">
-                        @(running ? "Comparing..." : "Compare Snapshots")
-                    </button>
-                </div>
-            </div>
-        }
+        <div class="text-center py-16 text-gray-400">
+            <div class="text-5xl mb-4">📸</div>
+            <p class="text-lg mb-2">Need at least 2 snapshots</p>
+            <p class="text-sm max-w-md mx-auto">
+                Connect to a database and click <strong>Save Snapshot</strong> on the
+                <a href="/" class="text-blue-500 hover:underline">home page</a>
+                to capture one. To diff databases on different networks, save a named snapshot of each, then come back here.
+            </p>
+            <p class="mt-3 text-xs text-gray-400 dark:text-gray-500">
+                Currently @allSnapshots.Count snapshot(s) stored.
+            </p>
+        </div>
     }
     else
     {
-        @* ── Cross-Database Diff ────────────────────────────────── *@
-        @if (allConnections.Count < 2)
-        {
-            <div class="text-center py-16 text-gray-400">
-                <div class="text-5xl mb-4">🔗</div>
-                <p class="text-lg mb-2">Need at least 2 connections</p>
-                <p class="text-sm">Add more connections from the
-                    <a href="/connections" class="text-blue-500 hover:underline">Connections</a> page to compare across databases.
-                </p>
-            </div>
-        }
-        else
-        {
-            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 mb-6">
-                <div class="grid grid-cols-2 gap-6">
-                    <div class="space-y-2">
-                        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Baseline (e.g. Production)</label>
-                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
-                                @onchange="@(async e => await OnBaselineConnChanged(int.Parse(e.Value!.ToString()!)))">
-                            @foreach (var conn in allConnections)
-                            {
-                                <option value="@conn.Id" selected="@(conn.Id == baselineConnId)">
-                                    @if (!string.IsNullOrEmpty(conn.Tag)) { @($"[{conn.Tag}] ") }@conn.Name
-                                </option>
-                            }
-                        </select>
-                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
-                                @bind="baselineDb" disabled="@(baselineDbList.Count == 0)">
-                            @if (baselineDbList.Count == 0)
-                            {
-                                <option value="">@(loadingBaselineDbs ? "Loading databases..." : "(no databases listed)")</option>
-                            }
-                            @foreach (var db in baselineDbList)
-                            {
-                                <option value="@db">@db</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="space-y-2">
-                        <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Compare To (e.g. Dev)</label>
-                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
-                                @onchange="@(async e => await OnCompareConnChanged(int.Parse(e.Value!.ToString()!)))">
-                            @foreach (var conn in allConnections)
-                            {
-                                <option value="@conn.Id" selected="@(conn.Id == compareConnId)">
-                                    @if (!string.IsNullOrEmpty(conn.Tag)) { @($"[{conn.Tag}] ") }@conn.Name
-                                </option>
-                            }
-                        </select>
-                        <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
-                                @bind="compareDb" disabled="@(compareDbList.Count == 0)">
-                            @if (compareDbList.Count == 0)
-                            {
-                                <option value="">@(loadingCompareDbs ? "Loading databases..." : "(no databases listed)")</option>
-                            }
-                            @foreach (var db in compareDbList)
-                            {
-                                <option value="@db">@db</option>
-                            }
-                        </select>
-                    </div>
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                @* ── Baseline side ───────────────────────────────────── *@
+                <div class="space-y-2">
+                    <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Baseline</label>
+
+                    <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                            @onchange="@(e => OnSideConnectionChanged(true, int.Parse(e.Value!.ToString()!)))">
+                        @foreach (var conn in connectionOptions)
+                        {
+                            <option value="@conn.Id" selected="@(conn.Id == baselineConnId)">
+                                @if (!string.IsNullOrEmpty(conn.Tag)) { @($"[{conn.Tag}] ") }@conn.Name
+                            </option>
+                        }
+                    </select>
+
+                    <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                            @onchange="@(e => OnSideDatabaseChanged(true, e.Value?.ToString() ?? ""))"
+                            disabled="@(baselineDbOptions.Count == 0)">
+                        @if (baselineDbOptions.Count == 0)
+                        {
+                            <option value="">(no snapshots for this connection)</option>
+                        }
+                        @foreach (var db in baselineDbOptions)
+                        {
+                            <option value="@db" selected="@(db == baselineDb)">@db</option>
+                        }
+                    </select>
+
+                    <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                            @bind="baselineSnapshotId"
+                            disabled="@(baselineSnapshotOptions.Count == 0)">
+                        @if (baselineSnapshotOptions.Count == 0)
+                        {
+                            <option value="0">(no snapshots for this database)</option>
+                        }
+                        @foreach (var snap in baselineSnapshotOptions)
+                        {
+                            <option value="@snap.Id">@FormatSnapshotLabel(snap)</option>
+                        }
+                    </select>
                 </div>
-                <p class="mt-3 text-xs text-gray-400 dark:text-gray-500">
-                    Both databases will be queried live to get the latest schema. This may take a few seconds.
-                </p>
-                <div class="mt-4">
-                    <button class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                            @onclick="RunCrossDiff" disabled="@running">
-                        @(running ? "Extracting & comparing..." : "Compare Databases")
-                    </button>
+
+                @* ── Compare side ───────────────────────────────────── *@
+                <div class="space-y-2">
+                    <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Compare To</label>
+
+                    <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                            @onchange="@(e => OnSideConnectionChanged(false, int.Parse(e.Value!.ToString()!)))">
+                        @foreach (var conn in connectionOptions)
+                        {
+                            <option value="@conn.Id" selected="@(conn.Id == compareConnId)">
+                                @if (!string.IsNullOrEmpty(conn.Tag)) { @($"[{conn.Tag}] ") }@conn.Name
+                            </option>
+                        }
+                    </select>
+
+                    <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                            @onchange="@(e => OnSideDatabaseChanged(false, e.Value?.ToString() ?? ""))"
+                            disabled="@(compareDbOptions.Count == 0)">
+                        @if (compareDbOptions.Count == 0)
+                        {
+                            <option value="">(no snapshots for this connection)</option>
+                        }
+                        @foreach (var db in compareDbOptions)
+                        {
+                            <option value="@db" selected="@(db == compareDb)">@db</option>
+                        }
+                    </select>
+
+                    <select class="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                            @bind="compareSnapshotId"
+                            disabled="@(compareSnapshotOptions.Count == 0)">
+                        @if (compareSnapshotOptions.Count == 0)
+                        {
+                            <option value="0">(no snapshots for this database)</option>
+                        }
+                        @foreach (var snap in compareSnapshotOptions)
+                        {
+                            <option value="@snap.Id">@FormatSnapshotLabel(snap)</option>
+                        }
+                    </select>
                 </div>
             </div>
-        }
+
+            <p class="mt-4 text-xs text-gray-400 dark:text-gray-500">
+                Diff runs entirely from saved snapshots — no live database connection needed. Manage snapshots on the
+                <a href="/snapshots" class="text-blue-500 hover:underline">Snapshots</a> page.
+            </p>
+            <div class="mt-4">
+                <button class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                        @onclick="RunDiff" disabled="@(running || baselineSnapshotId == 0 || compareSnapshotId == 0)">
+                    @(running ? "Comparing..." : "Compare Snapshots")
+                </button>
+            </div>
+        </div>
     }
 
     @if (errorMessage is not null)
@@ -166,12 +138,12 @@
 
     @if (diffResult is not null)
     {
-        @if (crossDiffLabels is not null)
+        @if (diffLabels is not null)
         {
             <div class="flex items-center gap-2 mb-4 text-xs text-gray-500 dark:text-gray-400">
-                <span class="font-medium text-gray-700 dark:text-gray-200">@crossDiffLabels.Value.Baseline</span>
+                <span class="font-medium text-gray-700 dark:text-gray-200">@diffLabels.Value.Baseline</span>
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
-                <span class="font-medium text-gray-700 dark:text-gray-200">@crossDiffLabels.Value.Compare</span>
+                <span class="font-medium text-gray-700 dark:text-gray-200">@diffLabels.Value.Compare</span>
             </div>
         }
 
@@ -557,7 +529,7 @@
                             <!-- Direction selector -->
                             <div>
                                 <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Direction</label>
-                                <div class="flex items-center gap-2 text-sm">
+                                <div class="flex items-center gap-2 text-sm flex-wrap">
                                     <button class="px-3 py-1.5 rounded-lg border transition-colors @(scriptDirection == ScriptDirection.BaselineToTarget ? "border-blue-400 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium" : "border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400")"
                                             @onclick="() => SetDirection(ScriptDirection.BaselineToTarget)">
                                         Apply to @GetLabel(true) → match @GetLabel(false)
@@ -639,7 +611,7 @@
             {
                 <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl mt-6 p-4">
                     <p class="text-sm text-amber-700 dark:text-amber-300">
-                        <strong>Migration script generation not available</strong> — the two schemas use different database engines.
+                        <strong>Migration script generation not available</strong> — the two snapshots use different database engines (or one is Cosmos DB).
                         Cross-engine migration is not supported (and generally not safe to do automatically).
                     </p>
                 </div>
@@ -649,36 +621,32 @@
 </div>
 
 @code {
-    private enum DiffMode { Snapshot, CrossDatabase }
-    private DiffMode mode = DiffMode.CrossDatabase;
+    // ── All snapshot summaries (loaded once on init / after diff) ─────
+    private List<SnapshotSummary> allSnapshots = [];
 
-    // Snapshot diff state
-    private List<SnapshotSummary> snapshots = [];
-    private int baselineId;
-    private int compareId;
-
-    // Cross-database diff state
-    private List<ConnectionProfile> allConnections = [];
+    // ── Picker state ───────────────────────────────────────────────────
+    private List<ConnectionProfile> connectionOptions = [];
     private int baselineConnId;
     private int compareConnId;
     private string baselineDb = "";
     private string compareDb = "";
-    private List<string> baselineDbList = [];
-    private List<string> compareDbList = [];
-    private bool loadingBaselineDbs;
-    private bool loadingCompareDbs;
-    private (string Baseline, string Compare)? crossDiffLabels;
+    private List<string> baselineDbOptions = [];
+    private List<string> compareDbOptions = [];
+    private List<SnapshotSummary> baselineSnapshotOptions = [];
+    private List<SnapshotSummary> compareSnapshotOptions = [];
+    private int baselineSnapshotId;
+    private int compareSnapshotId;
 
-    // Shared state
+    // ── Diff state ─────────────────────────────────────────────────────
     private bool running;
     private string? errorMessage;
     private SchemaDiffResult? diffResult;
+    private (string Baseline, string Compare)? diffLabels;
 
-    // Captured schemas for script generation (baseline = what user selected as baseline)
     private DatabaseSchema? baselineSchema;
     private DatabaseSchema? targetSchema;
 
-    // Migration script UI state
+    // ── Migration script panel ────────────────────────────────────────
     private enum ScriptDirection { BaselineToTarget, TargetToBaseline }
     private bool scriptPanelOpen;
     private ScriptDirection scriptDirection = ScriptDirection.BaselineToTarget;
@@ -695,41 +663,115 @@
 
     private string GetLabel(bool isBaseline)
     {
-        if (crossDiffLabels.HasValue)
-            return isBaseline ? crossDiffLabels.Value.Baseline : crossDiffLabels.Value.Compare;
+        if (diffLabels.HasValue)
+            return isBaseline ? diffLabels.Value.Baseline : diffLabels.Value.Compare;
         return isBaseline ? "baseline" : "compare";
     }
 
     protected override async Task OnInitializedAsync()
     {
-        allConnections = (await ConnectionRepo.GetAllAsync()).ToList();
-
-        if (allConnections.Count >= 2)
-        {
-            baselineConnId = allConnections[0].Id;
-            compareConnId = allConnections[1].Id;
-            await LoadBaselineDbsAsync();
-            await LoadCompareDbsAsync();
-        }
-
-        if (SessionState.ActiveConnection is not null && SessionState.CurrentSchema is not null)
-        {
-            snapshots = (await SnapshotRepo.GetSnapshotListAsync(
-                SessionState.ActiveConnection.Id,
-                SessionState.CurrentSchema.DatabaseName)).ToList();
-
-            if (snapshots.Count >= 2)
-            {
-                compareId  = snapshots[0].Id;
-                baselineId = snapshots[^1].Id;
-            }
-        }
+        await ReloadSnapshotsAsync();
+        if (allSnapshots.Count >= 2)
+            InitDefaults();
     }
 
-    private async Task RunSnapshotDiff()
+    private async Task ReloadSnapshotsAsync()
     {
-        if (baselineId == 0 || compareId == 0) return;
-        if (baselineId == compareId)
+        allSnapshots = (await SnapshotRepo.GetAllAsync()).ToList();
+
+        // Connections that actually have at least one snapshot
+        var connIds = allSnapshots.Select(s => s.ConnectionId).Distinct().ToHashSet();
+        var allConns = await ConnectionRepo.GetAllAsync();
+        connectionOptions = allConns.Where(c => connIds.Contains(c.Id)).ToList();
+    }
+
+    private void InitDefaults()
+    {
+        // Default both sides to the most-recent snapshot's connection. Compare side
+        // prefers the second-most-recent snapshot if available.
+        var newest = allSnapshots[0];
+        baselineConnId = newest.ConnectionId;
+        baselineDb = newest.DatabaseName;
+        baselineSnapshotId = newest.Id;
+
+        var second = allSnapshots.Skip(1).FirstOrDefault() ?? newest;
+        compareConnId = second.ConnectionId;
+        compareDb = second.DatabaseName;
+        compareSnapshotId = second.Id;
+
+        RebuildDbOptions(true);
+        RebuildDbOptions(false);
+        RebuildSnapshotOptions(true);
+        RebuildSnapshotOptions(false);
+    }
+
+    private void OnSideConnectionChanged(bool isBaseline, int newConnId)
+    {
+        if (isBaseline) baselineConnId = newConnId;
+        else compareConnId = newConnId;
+
+        RebuildDbOptions(isBaseline);
+        // Pick the first DB available under the new connection
+        var dbs = isBaseline ? baselineDbOptions : compareDbOptions;
+        var newDb = dbs.FirstOrDefault() ?? "";
+        if (isBaseline) baselineDb = newDb;
+        else compareDb = newDb;
+
+        RebuildSnapshotOptions(isBaseline);
+        // Pick the first (most recent) snapshot
+        var firstSnap = (isBaseline ? baselineSnapshotOptions : compareSnapshotOptions).FirstOrDefault();
+        if (isBaseline) baselineSnapshotId = firstSnap?.Id ?? 0;
+        else compareSnapshotId = firstSnap?.Id ?? 0;
+    }
+
+    private void OnSideDatabaseChanged(bool isBaseline, string newDb)
+    {
+        if (isBaseline) baselineDb = newDb;
+        else compareDb = newDb;
+
+        RebuildSnapshotOptions(isBaseline);
+        var firstSnap = (isBaseline ? baselineSnapshotOptions : compareSnapshotOptions).FirstOrDefault();
+        if (isBaseline) baselineSnapshotId = firstSnap?.Id ?? 0;
+        else compareSnapshotId = firstSnap?.Id ?? 0;
+    }
+
+    private void RebuildDbOptions(bool isBaseline)
+    {
+        var connId = isBaseline ? baselineConnId : compareConnId;
+        var dbs = allSnapshots
+            .Where(s => s.ConnectionId == connId)
+            .Select(s => s.DatabaseName)
+            .Distinct()
+            .OrderBy(d => d)
+            .ToList();
+        if (isBaseline) baselineDbOptions = dbs;
+        else compareDbOptions = dbs;
+    }
+
+    private void RebuildSnapshotOptions(bool isBaseline)
+    {
+        var connId = isBaseline ? baselineConnId : compareConnId;
+        var dbName = isBaseline ? baselineDb : compareDb;
+        var snaps = allSnapshots
+            .Where(s => s.ConnectionId == connId && s.DatabaseName == dbName)
+            .OrderByDescending(s => s.ExtractedAt)
+            .ToList();
+        if (isBaseline) baselineSnapshotOptions = snaps;
+        else compareSnapshotOptions = snaps;
+    }
+
+    private static string FormatSnapshotLabel(SnapshotSummary snap)
+    {
+        var ts = snap.ExtractedAt.ToLocalTime().ToString("g");
+        return string.IsNullOrEmpty(snap.Name)
+            ? $"📷 {ts}"
+            : $"⭐ {snap.Name} — {ts}";
+    }
+
+    private async Task RunDiff()
+    {
+        if (baselineSnapshotId == 0 || compareSnapshotId == 0) return;
+        if (baselineSnapshotId == compareSnapshotId)
         {
             errorMessage = "Please select two different snapshots.";
             return;
@@ -738,67 +780,38 @@
         running = true;
         errorMessage = null;
         diffResult = null;
-        crossDiffLabels = null;
+        diffLabels = null;
         ResetScriptState();
 
         try
         {
-            var baseline = await SnapshotRepo.GetByIdAsync(baselineId);
-            var compare  = await SnapshotRepo.GetByIdAsync(compareId);
-            if (baseline is null || compare is null)
+            var baseline = await SnapshotRepo.GetByIdAsync(baselineSnapshotId);
+            var compare = await SnapshotRepo.GetByIdAsync(compareSnapshotId);
+            var baseSummary = await SnapshotRepo.GetSummaryByIdAsync(baselineSnapshotId);
+            var compSummary = await SnapshotRepo.GetSummaryByIdAsync(compareSnapshotId);
+
+            if (baseline is null || compare is null || baseSummary is null || compSummary is null)
             {
                 errorMessage = "Could not load one or both snapshots.";
                 return;
             }
+
             diffResult = DiffService.Compare(baseline, compare);
             baselineSchema = baseline;
             targetSchema = compare;
-            crossDiffLabels = ($"snapshot @ {baseline.ExtractedAt:g}", $"snapshot @ {compare.ExtractedAt:g}");
+            diffLabels = (LabelFor(baseSummary), LabelFor(compSummary));
         }
         catch (Exception ex) { errorMessage = $"Diff failed: {ex.Message}"; }
         finally { running = false; }
     }
 
-    private async Task RunCrossDiff()
+    private static string LabelFor(SnapshotSummary s)
     {
-        if (baselineConnId == 0 || compareConnId == 0) return;
-        if (baselineConnId == compareConnId)
-        {
-            errorMessage = "Please select two different connections. For same-database comparison, use Snapshot Diff.";
-            return;
-        }
-
-        running = true;
-        errorMessage = null;
-        diffResult = null;
-        crossDiffLabels = null;
-        ResetScriptState();
-
-        try
-        {
-            var baseConn = allConnections.First(c => c.Id == baselineConnId);
-            var compConn = allConnections.First(c => c.Id == compareConnId);
-
-            if (string.IsNullOrEmpty(baselineDb) || string.IsNullOrEmpty(compareDb))
-            {
-                errorMessage = "Pick a database for both sides.";
-                return;
-            }
-
-            // Extract both schemas live, targeting the selected DBs
-            var baseSchema = await SchemaLoader.LoadSchemaAsync(baseConn.Id, baseConn.Provider, baselineDb, forceRefresh: true);
-            var compSchema = await SchemaLoader.LoadSchemaAsync(compConn.Id, compConn.Provider, compareDb, forceRefresh: true);
-
-            diffResult = DiffService.Compare(baseSchema, compSchema);
-            baselineSchema = baseSchema;
-            targetSchema = compSchema;
-            crossDiffLabels = (
-                $"{(baseConn.Tag is not null ? $"[{baseConn.Tag}] " : "")}{baseConn.Name} · {baselineDb}",
-                $"{(compConn.Tag is not null ? $"[{compConn.Tag}] " : "")}{compConn.Name} · {compareDb}"
-            );
-        }
-        catch (Exception ex) { errorMessage = $"Cross-database diff failed: {ex.Message}"; }
-        finally { running = false; }
+        var conn = s.ConnectionName;
+        var ts = s.ExtractedAt.ToLocalTime().ToString("g");
+        return string.IsNullOrEmpty(s.Name)
+            ? $"{conn} · {s.DatabaseName} @ {ts}"
+            : $"{conn} · {s.DatabaseName} · \"{s.Name}\" @ {ts}";
     }
 
     // ── Migration script actions ─────────────────────────────────────
@@ -840,11 +853,9 @@
     {
         if (baselineSchema is null || targetSchema is null || diffResult is null) return;
 
-        // The existing diffResult was computed as baseline→target. When user flips direction,
-        // we need to re-compute with swapped sides so added/removed semantics are correct.
         var (src, dst) = scriptDirection == ScriptDirection.BaselineToTarget
-            ? (baselineSchema, targetSchema)   // apply to baseline to match target
-            : (targetSchema, baselineSchema);  // apply to target to match baseline
+            ? (baselineSchema, targetSchema)
+            : (targetSchema, baselineSchema);
 
         var directedDiff = DiffService.Compare(src, dst);
         var dialect = MigrationScriptGenerator.DialectFor(src.Provider);
@@ -903,73 +914,5 @@
         var bytes = System.Text.Encoding.UTF8.GetBytes(generatedScript);
         var fileName = $"migration_{DateTime.Now:yyyyMMdd_HHmmss}.sql";
         await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "text/plain", bytes);
-    }
-
-    private async Task OnBaselineConnChanged(int newId)
-    {
-        baselineConnId = newId;
-        baselineDb = "";
-        baselineDbList = [];
-        await LoadBaselineDbsAsync();
-    }
-
-    private async Task OnCompareConnChanged(int newId)
-    {
-        compareConnId = newId;
-        compareDb = "";
-        compareDbList = [];
-        await LoadCompareDbsAsync();
-    }
-
-    private async Task LoadBaselineDbsAsync()
-    {
-        if (baselineConnId == 0) return;
-        var conn = allConnections.FirstOrDefault(c => c.Id == baselineConnId);
-        if (conn is null) return;
-
-        loadingBaselineDbs = true;
-        StateHasChanged();
-        try
-        {
-            var dbs = await SchemaLoader.ListDatabasesAsync(conn.Id, conn.Provider);
-            baselineDbList = dbs.ToList();
-            baselineDb = baselineDbList.FirstOrDefault(d => d.Equals(conn.LastDatabaseName, StringComparison.OrdinalIgnoreCase))
-                         ?? baselineDbList.FirstOrDefault() ?? "";
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Could not list databases for {conn.Name}: {ex.Message}";
-        }
-        finally
-        {
-            loadingBaselineDbs = false;
-            StateHasChanged();
-        }
-    }
-
-    private async Task LoadCompareDbsAsync()
-    {
-        if (compareConnId == 0) return;
-        var conn = allConnections.FirstOrDefault(c => c.Id == compareConnId);
-        if (conn is null) return;
-
-        loadingCompareDbs = true;
-        StateHasChanged();
-        try
-        {
-            var dbs = await SchemaLoader.ListDatabasesAsync(conn.Id, conn.Provider);
-            compareDbList = dbs.ToList();
-            compareDb = compareDbList.FirstOrDefault(d => d.Equals(conn.LastDatabaseName, StringComparison.OrdinalIgnoreCase))
-                        ?? compareDbList.FirstOrDefault() ?? "";
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Could not list databases for {conn.Name}: {ex.Message}";
-        }
-        finally
-        {
-            loadingCompareDbs = false;
-            StateHasChanged();
-        }
     }
 }

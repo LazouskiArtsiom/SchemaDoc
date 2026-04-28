@@ -53,6 +53,14 @@ public class SchemaSnapshot
     public string DatabaseName { get; set; } = "";
     public DateTime ExtractedAt { get; set; }
     public string SchemaJson { get; set; } = "";
+
+    /// <summary>
+    /// Optional user-supplied label. Named snapshots are durable artifacts and never
+    /// auto-rotate. Unnamed snapshots are throwaway cache (Refresh Schema) and rotate
+    /// when their count per (connection, database) exceeds the cap.
+    /// </summary>
+    public string? Name { get; set; }
+    public string? Notes { get; set; }
 }
 
 /// <summary>
