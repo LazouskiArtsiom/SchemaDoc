@@ -6,7 +6,13 @@ public record SchemaDiffResult(
     IReadOnlyList<TableDiff> ModifiedTables,
     IReadOnlyList<SchemaTrigger>? AddedTriggers = null,
     IReadOnlyList<SchemaTrigger>? RemovedTriggers = null,
-    IReadOnlyList<TriggerDiff>? ModifiedTriggers = null
+    IReadOnlyList<TriggerDiff>? ModifiedTriggers = null,
+    IReadOnlyList<StoredProcedure>? AddedProcedures = null,
+    IReadOnlyList<StoredProcedure>? RemovedProcedures = null,
+    IReadOnlyList<RoutineDiff>? ModifiedProcedures = null,
+    IReadOnlyList<SchemaFunction>? AddedFunctions = null,
+    IReadOnlyList<SchemaFunction>? RemovedFunctions = null,
+    IReadOnlyList<RoutineDiff>? ModifiedFunctions = null
 )
 {
     public bool IsIdentical =>
@@ -15,8 +21,23 @@ public record SchemaDiffResult(
         ModifiedTables.Count == 0 &&
         (AddedTriggers is null || AddedTriggers.Count == 0) &&
         (RemovedTriggers is null || RemovedTriggers.Count == 0) &&
-        (ModifiedTriggers is null || ModifiedTriggers.Count == 0);
+        (ModifiedTriggers is null || ModifiedTriggers.Count == 0) &&
+        (AddedProcedures is null || AddedProcedures.Count == 0) &&
+        (RemovedProcedures is null || RemovedProcedures.Count == 0) &&
+        (ModifiedProcedures is null || ModifiedProcedures.Count == 0) &&
+        (AddedFunctions is null || AddedFunctions.Count == 0) &&
+        (RemovedFunctions is null || RemovedFunctions.Count == 0) &&
+        (ModifiedFunctions is null || ModifiedFunctions.Count == 0);
 }
+
+/// <summary>
+/// Describes what changed about a procedure or function. Used for both procs
+/// and functions because the diff shape is the same: signature/body changes.
+/// </summary>
+public record RoutineDiff(
+    string FullName,
+    IReadOnlyList<string> Changes
+);
 
 public record TableDiff(
     string Schema,

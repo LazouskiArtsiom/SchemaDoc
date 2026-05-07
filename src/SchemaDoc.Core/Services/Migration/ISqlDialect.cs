@@ -54,6 +54,14 @@ public interface ISqlDialect
     string CreateTrigger(SchemaTrigger trg);
     string DropTrigger(SchemaTrigger trg);
 
+    // ── Stored Procedures ─────────────────────────────────────────────
+    string CreateProcedure(StoredProcedure proc);
+    string DropProcedure(StoredProcedure proc);
+
+    // ── Functions ─────────────────────────────────────────────────────
+    string CreateFunction(SchemaFunction fn);
+    string DropFunction(SchemaFunction fn);
+
     // ── Types ─────────────────────────────────────────────────────────
     /// <summary>Renders a full column type spec (e.g. "NVARCHAR(100)", "DECIMAL(10,2)", "INT").</summary>
     string RenderColumnType(SchemaColumn col);

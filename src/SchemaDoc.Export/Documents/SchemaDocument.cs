@@ -58,6 +58,23 @@ public class SchemaDocument : IDocument
                     col.Item().PageBreak();
                     ComposeTableSection(col, table);
                 }
+
+                // DB-level sections (only emit a page break + section if there's content)
+                if ((_schema.Triggers?.Count ?? 0) > 0)
+                {
+                    col.Item().PageBreak();
+                    ComposeTriggersSection(col);
+                }
+                if (_schema.StoredProcedures.Count > 0)
+                {
+                    col.Item().PageBreak();
+                    ComposeStoredProceduresSection(col);
+                }
+                if ((_schema.Functions?.Count ?? 0) > 0)
+                {
+                    col.Item().PageBreak();
+                    ComposeFunctionsSection(col);
+                }
             });
 
             page.Footer().AlignCenter().Text(text =>
@@ -187,6 +204,43 @@ public class SchemaDocument : IDocument
                 .FontSize(12).Bold().FontColor(PrimaryColor);
 
             ComposeForeignKeysGrid(col, tableFks);
+        }
+
+        // Indexes
+        if (table.Indexes is { Count: > 0 })
+        {
+            col.Item().PaddingTop(12).PaddingBottom(5)
+                .Text("Indexes")
+                .FontSize(12).Bold().FontColor(PrimaryColor);
+            ComposeIndexesGrid(col, table.Indexes);
+        }
+
+        // Unique constraints
+        if (table.UniqueConstraints is { Count: > 0 })
+        {
+            col.Item().PaddingTop(12).PaddingBottom(5)
+                .Text("Unique Constraints")
+                .FontSize(12).Bold().FontColor(PrimaryColor);
+            ComposeUniqueConstraintsGrid(col, table.UniqueConstraints);
+        }
+
+        // Check constraints
+        if (table.CheckConstraints is { Count: > 0 })
+        {
+            col.Item().PaddingTop(12).PaddingBottom(5)
+                .Text("Check Constraints")
+                .FontSize(12).Bold().FontColor(PrimaryColor);
+            ComposeCheckConstraintsGrid(col, table.CheckConstraints);
+        }
+
+        // Computed columns
+        var computed = table.Columns.Where(c => c.IsComputed && !string.IsNullOrEmpty(c.ComputedExpression)).ToList();
+        if (computed.Count > 0)
+        {
+            col.Item().PaddingTop(12).PaddingBottom(5)
+                .Text("Computed Columns")
+                .FontSize(12).Bold().FontColor(PrimaryColor);
+            ComposeComputedColumnsGrid(col, computed);
         }
     }
 
@@ -349,5 +403,331 @@ public class SchemaDocument : IDocument
     {
         return _annotations?.FirstOrDefault(a =>
             a.SchemaName == table.Schema && a.TableName == table.Name);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Per-table extras: indexes, unique constraints, check constraints, computed
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static void ComposeIndexesGrid(ColumnDescriptor col, IReadOnlyList<SchemaIndex> indexes)
+    {
+        col.Item().Table(grid =>
+        {
+            grid.ColumnsDefinition(columns =>
+            {
+                columns.RelativeColumn(3);   // Name
+                columns.RelativeColumn(4);   // Columns
+                columns.ConstantColumn(60);  // Unique
+                columns.RelativeColumn(2);   // Type
+                columns.RelativeColumn(3);   // Filter / Includes
+            });
+
+            grid.Header(header =>
+            {
+                HeaderCell(header, "Name");
+                HeaderCell(header, "Columns");
+                HeaderCell(header, "Unique");
+                HeaderCell(header, "Type");
+                HeaderCell(header, "Filter / Included");
+            });
+
+            var i = 1;
+            foreach (var ix in indexes)
+            {
+                var bg = i % 2 == 0 ? LightGray : "#FFFFFF";
+                var cols = string.Join(", ", ix.Columns.Select(c => c.IsDescending ? c.Name + " DESC" : c.Name));
+                var extra = "";
+                if (ix.IncludedColumns is { Count: > 0 })
+                    extra = "INCLUDE (" + string.Join(", ", ix.IncludedColumns) + ")";
+                if (!string.IsNullOrEmpty(ix.FilterExpression))
+                    extra = (extra.Length > 0 ? extra + " · " : "") + "WHERE " + ix.FilterExpression;
+
+                DataCell(grid, ix.Name, bg);
+                DataCell(grid, cols, bg);
+                DataCell(grid, ix.IsUnique ? "Yes" : "No", bg);
+                DataCell(grid, ix.IndexType ?? "", bg);
+                DataCell(grid, extra, bg);
+                i++;
+            }
+        });
+    }
+
+    private static void ComposeUniqueConstraintsGrid(ColumnDescriptor col, IReadOnlyList<UniqueConstraint> uqs)
+    {
+        col.Item().Table(grid =>
+        {
+            grid.ColumnsDefinition(columns =>
+            {
+                columns.RelativeColumn(2);
+                columns.RelativeColumn(5);
+            });
+            grid.Header(header =>
+            {
+                HeaderCell(header, "Name");
+                HeaderCell(header, "Columns");
+            });
+            var i = 1;
+            foreach (var uq in uqs)
+            {
+                var bg = i % 2 == 0 ? LightGray : "#FFFFFF";
+                DataCell(grid, uq.Name, bg);
+                DataCell(grid, string.Join(", ", uq.Columns), bg);
+                i++;
+            }
+        });
+    }
+
+    private static void ComposeCheckConstraintsGrid(ColumnDescriptor col, IReadOnlyList<CheckConstraint> cks)
+    {
+        col.Item().Table(grid =>
+        {
+            grid.ColumnsDefinition(columns =>
+            {
+                columns.RelativeColumn(2);
+                columns.RelativeColumn(5);
+            });
+            grid.Header(header =>
+            {
+                HeaderCell(header, "Name");
+                HeaderCell(header, "Expression");
+            });
+            var i = 1;
+            foreach (var ck in cks)
+            {
+                var bg = i % 2 == 0 ? LightGray : "#FFFFFF";
+                DataCell(grid, ck.Name, bg);
+                grid.Cell().Background(bg).BorderBottom(1).BorderColor(BorderColor).Padding(4)
+                    .Text(ck.Expression).FontSize(8).FontFamily("Courier New");
+                i++;
+            }
+        });
+    }
+
+    private static void ComposeComputedColumnsGrid(ColumnDescriptor col, IReadOnlyList<SchemaColumn> computed)
+    {
+        col.Item().Table(grid =>
+        {
+            grid.ColumnsDefinition(columns =>
+            {
+                columns.RelativeColumn(2);
+                columns.RelativeColumn(2);
+                columns.RelativeColumn(5);
+            });
+            grid.Header(header =>
+            {
+                HeaderCell(header, "Column");
+                HeaderCell(header, "Type");
+                HeaderCell(header, "Expression");
+            });
+            var i = 1;
+            foreach (var c in computed)
+            {
+                var bg = i % 2 == 0 ? LightGray : "#FFFFFF";
+                DataCell(grid, c.Name, bg);
+                DataCell(grid, c.DataType, bg);
+                grid.Cell().Background(bg).BorderBottom(1).BorderColor(BorderColor).Padding(4)
+                    .Text(c.ComputedExpression ?? "").FontSize(8).FontFamily("Courier New");
+                i++;
+            }
+        });
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // DB-level sections: triggers, stored procedures, functions
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private void ComposeTriggersSection(ColumnDescriptor col)
+    {
+        var triggers = _schema.Triggers ?? Array.Empty<SchemaTrigger>();
+        if (triggers.Count == 0) return;
+
+        col.Item().PaddingBottom(15)
+            .Text("Triggers")
+            .FontSize(22).Bold().FontColor(PrimaryColor);
+        col.Item().Height(2).Background(AccentColor);
+        col.Item().PaddingTop(12);
+
+        col.Item().Table(grid =>
+        {
+            grid.ColumnsDefinition(columns =>
+            {
+                columns.RelativeColumn(3);   // Name
+                columns.RelativeColumn(3);   // Table
+                columns.ConstantColumn(70);  // Timing
+                columns.ConstantColumn(110); // Event
+            });
+            grid.Header(header =>
+            {
+                HeaderCell(header, "Name");
+                HeaderCell(header, "Table");
+                HeaderCell(header, "Timing");
+                HeaderCell(header, "Event");
+            });
+            var i = 1;
+            foreach (var t in triggers)
+            {
+                var bg = i % 2 == 0 ? LightGray : "#FFFFFF";
+                DataCell(grid, t.FullName, bg);
+                DataCell(grid, $"{t.TableSchema}.{t.TableName}", bg);
+                DataCell(grid, t.Timing, bg);
+                DataCell(grid, t.Event, bg);
+                i++;
+            }
+        });
+    }
+
+    private void ComposeStoredProceduresSection(ColumnDescriptor col)
+    {
+        if (_schema.StoredProcedures.Count == 0) return;
+
+        col.Item().PaddingBottom(15)
+            .Text("Stored Procedures")
+            .FontSize(22).Bold().FontColor(PrimaryColor);
+        col.Item().Height(2).Background(AccentColor);
+        col.Item().PaddingTop(12);
+
+        foreach (var p in _schema.StoredProcedures)
+        {
+            ComposeRoutineBlock(col,
+                title: p.FullName,
+                kindLabel: "PROCEDURE",
+                returnType: null,
+                parameters: p.Parameters,
+                dependencies: p.Dependencies,
+                body: p.Definition);
+        }
+    }
+
+    private void ComposeFunctionsSection(ColumnDescriptor col)
+    {
+        var functions = _schema.Functions ?? Array.Empty<SchemaFunction>();
+        if (functions.Count == 0) return;
+
+        col.Item().PaddingBottom(15)
+            .Text("Functions")
+            .FontSize(22).Bold().FontColor(PrimaryColor);
+        col.Item().Height(2).Background(AccentColor);
+        col.Item().PaddingTop(12);
+
+        foreach (var f in functions)
+        {
+            var kindLabel = f.Kind switch
+            {
+                FunctionKind.Scalar => "FUNCTION (scalar)",
+                FunctionKind.InlineTable => "FUNCTION (inline table-valued)",
+                FunctionKind.TableValued => "FUNCTION (table-valued)",
+                _ => "FUNCTION"
+            };
+            ComposeRoutineBlock(col,
+                title: f.FullName,
+                kindLabel: kindLabel,
+                returnType: f.ReturnType,
+                parameters: f.Parameters,
+                dependencies: f.Dependencies,
+                body: f.Definition);
+        }
+    }
+
+    /// <summary>
+    /// Renders one procedure or function: header, parameters table, dependencies, body.
+    /// Body is truncated to keep the PDF manageable.
+    /// </summary>
+    private void ComposeRoutineBlock(
+        ColumnDescriptor col,
+        string title,
+        string kindLabel,
+        string? returnType,
+        IReadOnlyList<ProcParameter> parameters,
+        IReadOnlyList<ObjectDependency>? dependencies,
+        string? body)
+    {
+        col.Item().PaddingTop(8).PaddingBottom(2)
+            .Text(t =>
+            {
+                t.Span(title).FontSize(13).Bold().FontColor(PrimaryColor);
+                t.Span("    " + kindLabel).FontSize(8).FontColor(MediumGray);
+            });
+        if (!string.IsNullOrEmpty(returnType))
+        {
+            col.Item().PaddingBottom(4).Text(t =>
+            {
+                t.Span("Returns: ").FontSize(9).FontColor(MediumGray);
+                t.Span(returnType).FontSize(9).FontFamily("Courier New").FontColor("#4B5563");
+            });
+        }
+
+        if (parameters.Count > 0)
+        {
+            col.Item().PaddingTop(2).PaddingBottom(2).Text("Parameters").FontSize(10).Bold().FontColor(PrimaryColor);
+            col.Item().Table(grid =>
+            {
+                grid.ColumnsDefinition(columns =>
+                {
+                    columns.RelativeColumn(3);
+                    columns.RelativeColumn(3);
+                    columns.ConstantColumn(60);
+                    columns.ConstantColumn(70);
+                });
+                grid.Header(header =>
+                {
+                    HeaderCell(header, "Name");
+                    HeaderCell(header, "Type");
+                    HeaderCell(header, "Direction");
+                    HeaderCell(header, "Optional");
+                });
+                var i = 1;
+                foreach (var p in parameters)
+                {
+                    var bg = i % 2 == 0 ? LightGray : "#FFFFFF";
+                    DataCell(grid, p.Name, bg);
+                    DataCell(grid, p.DataType, bg);
+                    DataCell(grid, p.Direction, bg);
+                    DataCell(grid, p.IsOptional ? "Yes" : "No", bg);
+                    i++;
+                }
+            });
+        }
+
+        if (dependencies is { Count: > 0 })
+        {
+            col.Item().PaddingTop(6).PaddingBottom(2).Text("Dependencies").FontSize(10).Bold().FontColor(PrimaryColor);
+            col.Item().Table(grid =>
+            {
+                grid.ColumnsDefinition(columns =>
+                {
+                    columns.ConstantColumn(80);
+                    columns.RelativeColumn(4);
+                    columns.RelativeColumn(3);
+                });
+                grid.Header(header =>
+                {
+                    HeaderCell(header, "Kind");
+                    HeaderCell(header, "Object");
+                    HeaderCell(header, "Column");
+                });
+                var i = 1;
+                foreach (var d in dependencies.OrderBy(d => d.Kind).ThenBy(d => d.ReferencedSchema).ThenBy(d => d.ReferencedObject).ThenBy(d => d.ReferencedColumn))
+                {
+                    var bg = i % 2 == 0 ? LightGray : "#FFFFFF";
+                    DataCell(grid, d.Kind, bg);
+                    DataCell(grid, string.IsNullOrEmpty(d.ReferencedSchema) ? d.ReferencedObject : $"{d.ReferencedSchema}.{d.ReferencedObject}", bg);
+                    DataCell(grid, d.ReferencedColumn ?? "", bg);
+                    i++;
+                }
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            col.Item().PaddingTop(6).PaddingBottom(2).Text("Definition").FontSize(10).Bold().FontColor(PrimaryColor);
+            const int MaxBodyChars = 4000;
+            var rendered = body.Length > MaxBodyChars
+                ? body.Substring(0, MaxBodyChars) + $"\n-- … truncated ({body.Length - MaxBodyChars} more chars)"
+                : body;
+            col.Item().Background("#0F172A").Padding(8)
+                .Text(rendered).FontSize(7).FontFamily("Courier New").FontColor("#A7F3D0");
+        }
+
+        col.Item().PaddingBottom(6).Height(1).Background(BorderColor);
     }
 }

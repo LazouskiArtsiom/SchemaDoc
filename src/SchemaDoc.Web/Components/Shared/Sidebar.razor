@@ -221,7 +221,21 @@
                 <SidebarSection Title="Procedures" Icon="proc" Count="@FilteredProcs.Count()">
                     @foreach (var proc in FilteredProcs)
                     {
-                        <SidebarItem Label="@proc.Name" SubLabel="@proc.Schema" Href="#" />
+                        <SidebarItem Label="@proc.Name"
+                                     SubLabel="@proc.Schema"
+                                     Href="@($"/proc/{Uri.EscapeDataString(proc.Schema)}/{Uri.EscapeDataString(proc.Name)}")" />
+                    }
+                </SidebarSection>
+            }
+
+            @if (FilteredFunctions.Any())
+            {
+                <SidebarSection Title="Functions" Icon="proc" Count="@FilteredFunctions.Count()">
+                    @foreach (var fn in FilteredFunctions)
+                    {
+                        <SidebarItem Label="@fn.Name"
+                                     SubLabel="@fn.Schema"
+                                     Href="@($"/function/{Uri.EscapeDataString(fn.Schema)}/{Uri.EscapeDataString(fn.Name)}")" />
                     }
                 </SidebarSection>
             }
@@ -485,6 +499,11 @@
             .Where(p => string.IsNullOrWhiteSpace(searchText) ||
                         p.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase))
         ?? Enumerable.Empty<StoredProcedure>();
+
+    private IEnumerable<SchemaFunction> FilteredFunctions =>
+        (State.CurrentSchema?.Functions ?? Array.Empty<SchemaFunction>())
+            .Where(f => string.IsNullOrWhiteSpace(searchText) ||
+                        f.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase));
 
     private void OnStateChanged() => InvokeAsync(async () =>
     {

@@ -55,6 +55,7 @@ public class MySqlExtractor : ISchemaExtractor
         var views = (await conn.QueryAsync<RawView>(ViewsQuery)).ToList();
         var procs = (await conn.QueryAsync<RawProc>(ProcsQuery)).ToList();
         var procParams = (await conn.QueryAsync<RawProcParam>(ProcParamsQuery)).ToList();
+        var funcs = (await conn.QueryAsync<RawFunctionMy>(FunctionsQueryMy)).ToList();
 
         // Step 1 enhanced diff data
         var primaryKeys = (await conn.QueryAsync<RawPkColumn>(PrimaryKeysQuery)).ToList();
@@ -68,6 +69,20 @@ public class MySqlExtractor : ISchemaExtractor
         var storedProcs = BuildProcs(procs, procParams);
         var foreignKeys = BuildForeignKeys(fks);
         var triggerList = BuildTriggers(triggers);
+        var functionList = funcs.Select(f =>
+        {
+            // MySQL: parameter list is shared via INFORMATION_SCHEMA.PARAMETERS which the
+            // procs query already pulled. Look up by (schema, name).
+            var ps = procParams.Where(p => p.SchemaName == f.SchemaName && p.ProcName == f.FuncName)
+                .Select(param => new ProcParameter(
+                    Name: param.ParamName, DataType: param.DataType,
+                    Direction: param.ParameterMode switch { "OUT" => "OUT", "INOUT" => "INOUT", _ => "IN" },
+                    IsOptional: false))
+                .ToList();
+            return new SchemaFunction(f.SchemaName, f.FuncName, FunctionKind.Scalar, f.ReturnType, f.Definition, ps, Dependencies: null);
+        })
+        .OrderBy(f => f.Schema).ThenBy(f => f.Name)
+        .ToList();
 
         return new DatabaseSchema(
             DatabaseName: dbName,
@@ -77,7 +92,8 @@ public class MySqlExtractor : ISchemaExtractor
             Views: schemaViews,
             StoredProcedures: storedProcs,
             ForeignKeys: foreignKeys,
-            Triggers: triggerList
+            Triggers: triggerList,
+            Functions: functionList
         );
     }
 
@@ -303,6 +319,14 @@ public class MySqlExtractor : ISchemaExtractor
         public string? Definition { get; set; }
     }
 
+    private class RawFunctionMy
+    {
+        public string SchemaName { get; set; } = "";
+        public string FuncName { get; set; } = "";
+        public string? ReturnType { get; set; }
+        public string? Definition { get; set; }
+    }
+
     private class RawProcParam
     {
         public string SchemaName { get; set; } = "";
@@ -430,6 +454,9 @@ public class MySqlExtractor : ISchemaExtractor
         ORDER BY v.TABLE_SCHEMA, v.TABLE_NAME, c.ORDINAL_POSITION
         """;
 
+    // NOTE: MySQL dependency extraction is not implemented — INFORMATION_SCHEMA does
+    // not surface routine→table refs and parsing the body is fragile. Functions are
+    // pulled separately so the UI / PDF can list them distinctly.
     private const string ProcsQuery = """
         SELECT
             r.ROUTINE_SCHEMA                            AS SchemaName,
@@ -437,7 +464,19 @@ public class MySqlExtractor : ISchemaExtractor
             r.ROUTINE_DEFINITION                        AS Definition
         FROM INFORMATION_SCHEMA.ROUTINES r
         WHERE r.ROUTINE_SCHEMA = DATABASE()
-          AND r.ROUTINE_TYPE IN ('PROCEDURE', 'FUNCTION')
+          AND r.ROUTINE_TYPE = 'PROCEDURE'
+        ORDER BY r.ROUTINE_SCHEMA, r.ROUTINE_NAME
+        """;
+
+    private const string FunctionsQueryMy = """
+        SELECT
+            r.ROUTINE_SCHEMA                            AS SchemaName,
+            r.ROUTINE_NAME                              AS FuncName,
+            r.DATA_TYPE                                 AS ReturnType,
+            r.ROUTINE_DEFINITION                        AS Definition
+        FROM INFORMATION_SCHEMA.ROUTINES r
+        WHERE r.ROUTINE_SCHEMA = DATABASE()
+          AND r.ROUTINE_TYPE = 'FUNCTION'
         ORDER BY r.ROUTINE_SCHEMA, r.ROUTINE_NAME
         """;
 

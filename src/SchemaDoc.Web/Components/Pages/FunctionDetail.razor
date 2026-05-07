@@ -1,0 +1,45 @@
+@page "/function/{schema}/{funcName}"
+@layout SchemaDoc.Web.Components.Layout.MainLayout
+@inject SchemaDoc.Web.Services.SchemaSessionState State
+
+<PageTitle>@FuncName – SchemaDoc</PageTitle>
+
+@if (func is null)
+{
+    <div class="flex items-center justify-center h-full text-gray-400 dark:text-gray-500">
+        <p>Function not found. <a href="/" class="text-blue-500 hover:underline">Go home</a></p>
+    </div>
+}
+else
+{
+    <RoutineDetail SchemaName="@Schema"
+                   Name="@FuncName"
+                   KindLabel="@KindLabel(func.Kind)"
+                   ReturnType="@func.ReturnType"
+                   Parameters="@func.Parameters"
+                   Dependencies="@func.Dependencies"
+                   Definition="@func.Definition" />
+}
+
+@code {
+    [Parameter] public string Schema { get; set; } = "";
+    [Parameter] public string FuncName { get; set; } = "";
+
+    private SchemaFunction? func;
+
+    protected override void OnParametersSet()
+    {
+        func = (State.CurrentSchema?.Functions ?? Array.Empty<SchemaFunction>())
+            .FirstOrDefault(f =>
+                string.Equals(f.Schema, Schema, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(f.Name, FuncName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string KindLabel(FunctionKind kind) => kind switch
+    {
+        FunctionKind.Scalar      => "FUNCTION (scalar)",
+        FunctionKind.InlineTable => "FUNCTION (inline table-valued)",
+        FunctionKind.TableValued => "FUNCTION (table-valued)",
+        _                        => "FUNCTION"
+    };
+}

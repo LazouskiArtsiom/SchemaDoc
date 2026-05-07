@@ -185,6 +185,31 @@ public class SqlServerDialect : ISqlDialect
     public string DropTrigger(SchemaTrigger trg)
         => $"DROP TRIGGER {QuoteId(trg.Schema)}.{QuoteId(trg.Name)};";
 
+    public string CreateProcedure(StoredProcedure proc)
+    {
+        // sys.sql_modules.definition gives us the full "CREATE PROCEDURE ..." text.
+        // Like CreateTrigger, this must run as the only batch — caller is responsible
+        // for sandwiching it between GOs so SQL Server treats it as a fresh batch.
+        if (!string.IsNullOrWhiteSpace(proc.Definition))
+            return proc.Definition.Trim().TrimEnd(';') + ";";
+
+        return $"-- Procedure {proc.FullName}: original definition unavailable";
+    }
+
+    public string DropProcedure(StoredProcedure proc)
+        => $"DROP PROCEDURE {QuoteSchemaTable(proc.Schema, proc.Name)};";
+
+    public string CreateFunction(SchemaFunction fn)
+    {
+        if (!string.IsNullOrWhiteSpace(fn.Definition))
+            return fn.Definition.Trim().TrimEnd(';') + ";";
+
+        return $"-- Function {fn.FullName}: original definition unavailable";
+    }
+
+    public string DropFunction(SchemaFunction fn)
+        => $"DROP FUNCTION {QuoteSchemaTable(fn.Schema, fn.Name)};";
+
     private static string? MapAction(string? action) => action?.ToUpperInvariant() switch
     {
         null or "" or "NO_ACTION" or "NO ACTION" => null,

@@ -120,7 +120,16 @@
         foreach (var p in schema.StoredProcedures)
         {
             if (p.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
-                results.Add(new("Proc", p.FullName, $"{p.Parameters.Count} params", "#"));
+                results.Add(new("Proc", p.FullName, $"{p.Parameters.Count} params",
+                    $"/proc/{Uri.EscapeDataString(p.Schema)}/{Uri.EscapeDataString(p.Name)}"));
+        }
+
+        // Functions
+        foreach (var f in schema.Functions ?? Array.Empty<SchemaFunction>())
+        {
+            if (f.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
+                results.Add(new("Func", f.FullName, $"{f.Parameters.Count} params",
+                    $"/function/{Uri.EscapeDataString(f.Schema)}/{Uri.EscapeDataString(f.Name)}"));
         }
 
         return results.Take(50).ToList();
@@ -161,6 +170,7 @@
         "Column" => "bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300",
         "View"   => "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300",
         "Proc"   => "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300",
+        "Func"   => "bg-pink-100 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300",
         _        => "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300",
     };
 }

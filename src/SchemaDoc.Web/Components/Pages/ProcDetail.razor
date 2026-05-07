@@ -1,0 +1,36 @@
+@page "/proc/{schema}/{procName}"
+@layout SchemaDoc.Web.Components.Layout.MainLayout
+@inject SchemaDoc.Web.Services.SchemaSessionState State
+
+<PageTitle>@ProcName – SchemaDoc</PageTitle>
+
+@if (proc is null)
+{
+    <div class="flex items-center justify-center h-full text-gray-400 dark:text-gray-500">
+        <p>Procedure not found. <a href="/" class="text-blue-500 hover:underline">Go home</a></p>
+    </div>
+}
+else
+{
+    <RoutineDetail SchemaName="@Schema"
+                   Name="@ProcName"
+                   KindLabel="PROCEDURE"
+                   Parameters="@proc.Parameters"
+                   Dependencies="@proc.Dependencies"
+                   Definition="@proc.Definition" />
+}
+
+@code {
+    [Parameter] public string Schema { get; set; } = "";
+    [Parameter] public string ProcName { get; set; } = "";
+
+    private StoredProcedure? proc;
+
+    protected override void OnParametersSet()
+    {
+        proc = State.CurrentSchema?.StoredProcedures
+            .FirstOrDefault(p =>
+                string.Equals(p.Schema, Schema, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(p.Name, ProcName, StringComparison.OrdinalIgnoreCase));
+    }
+}

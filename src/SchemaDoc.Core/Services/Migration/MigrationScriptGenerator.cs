@@ -350,7 +350,109 @@ public class MigrationScriptGenerator
                     $"Create trigger {trg.FullName}",
                     dialect.CreateTrigger(trg)));
 
+        // ─── PROCEDURES & FUNCTIONS (SQL Server only) ───────────────
+        // Other dialects' Create/Drop methods throw NotSupportedException.
+        // Skip emission entirely for non-SQL-Server dialects so the generator
+        // returns a clean partial script rather than crashing mid-build.
+        if (dialect.Provider == DatabaseProvider.SqlServer)
+        {
+            EmitProcedureActions(actions, diff, baseline, target, dialect);
+            EmitFunctionActions(actions, diff, baseline, target, dialect);
+        }
+
         return actions;
+    }
+
+    private static void EmitProcedureActions(List<MigrationAction> actions, SchemaDiffResult diff,
+        DatabaseSchema baseline, DatabaseSchema target, ISqlDialect dialect)
+    {
+        if (diff.RemovedProcedures is not null)
+            foreach (var p in diff.RemovedProcedures)
+                actions.Add(new MigrationAction(
+                    $"proc:drop:{p.FullName}",
+                    MigrationActionType.DropProcedure,
+                    "Procedures",
+                    p.FullName,
+                    $"Drop procedure {p.FullName}",
+                    dialect.DropProcedure(p)));
+
+        if (diff.ModifiedProcedures is not null)
+            foreach (var rd in diff.ModifiedProcedures)
+            {
+                var oldP = baseline.StoredProcedures.First(p => p.FullName.Equals(rd.FullName, StringComparison.OrdinalIgnoreCase));
+                var newP = target.StoredProcedures.First(p => p.FullName.Equals(rd.FullName, StringComparison.OrdinalIgnoreCase));
+                actions.Add(new MigrationAction(
+                    $"proc:alter:{rd.FullName}:drop",
+                    MigrationActionType.DropProcedure,
+                    "Procedures",
+                    rd.FullName,
+                    $"Recreate procedure {rd.FullName} (drop step): {string.Join("; ", rd.Changes)}",
+                    dialect.DropProcedure(oldP)));
+                actions.Add(new MigrationAction(
+                    $"proc:alter:{rd.FullName}:add",
+                    MigrationActionType.CreateProcedure,
+                    "Procedures",
+                    rd.FullName,
+                    $"Recreate procedure {rd.FullName} (add step)",
+                    dialect.CreateProcedure(newP)));
+            }
+
+        if (diff.AddedProcedures is not null)
+            foreach (var p in diff.AddedProcedures)
+                actions.Add(new MigrationAction(
+                    $"proc:add:{p.FullName}",
+                    MigrationActionType.CreateProcedure,
+                    "Procedures",
+                    p.FullName,
+                    $"Create procedure {p.FullName}",
+                    dialect.CreateProcedure(p)));
+    }
+
+    private static void EmitFunctionActions(List<MigrationAction> actions, SchemaDiffResult diff,
+        DatabaseSchema baseline, DatabaseSchema target, ISqlDialect dialect)
+    {
+        if (diff.RemovedFunctions is not null)
+            foreach (var f in diff.RemovedFunctions)
+                actions.Add(new MigrationAction(
+                    $"function:drop:{f.FullName}",
+                    MigrationActionType.DropFunction,
+                    "Functions",
+                    f.FullName,
+                    $"Drop function {f.FullName}",
+                    dialect.DropFunction(f)));
+
+        if (diff.ModifiedFunctions is not null)
+            foreach (var rd in diff.ModifiedFunctions)
+            {
+                var oldFn = (baseline.Functions ?? Array.Empty<SchemaFunction>())
+                    .First(f => f.FullName.Equals(rd.FullName, StringComparison.OrdinalIgnoreCase));
+                var newFn = (target.Functions ?? Array.Empty<SchemaFunction>())
+                    .First(f => f.FullName.Equals(rd.FullName, StringComparison.OrdinalIgnoreCase));
+                actions.Add(new MigrationAction(
+                    $"function:alter:{rd.FullName}:drop",
+                    MigrationActionType.DropFunction,
+                    "Functions",
+                    rd.FullName,
+                    $"Recreate function {rd.FullName} (drop step): {string.Join("; ", rd.Changes)}",
+                    dialect.DropFunction(oldFn)));
+                actions.Add(new MigrationAction(
+                    $"function:alter:{rd.FullName}:add",
+                    MigrationActionType.CreateFunction,
+                    "Functions",
+                    rd.FullName,
+                    $"Recreate function {rd.FullName} (add step)",
+                    dialect.CreateFunction(newFn)));
+            }
+
+        if (diff.AddedFunctions is not null)
+            foreach (var f in diff.AddedFunctions)
+                actions.Add(new MigrationAction(
+                    $"function:add:{f.FullName}",
+                    MigrationActionType.CreateFunction,
+                    "Functions",
+                    f.FullName,
+                    $"Create function {f.FullName}",
+                    dialect.CreateFunction(f)));
     }
 
     /// <summary>
@@ -399,11 +501,15 @@ public class MigrationScriptGenerator
             }
             sb.AppendLine($"-- {action.Description}");
 
-            // CREATE TRIGGER on SQL Server stores the entire batch text (including
-            // leading comments) as the trigger definition in sys.sql_modules.
-            // Emit an early terminator so the comment ends up in a separate batch.
-            var isCreateTrigger = action.Type == MigrationActionType.CreateTrigger;
-            if (isCreateTrigger && !string.IsNullOrEmpty(dialect.StatementTerminator))
+            // CREATE TRIGGER / PROCEDURE / FUNCTION on SQL Server bakes the entire
+            // batch text (including leading comments) into sys.sql_modules.definition.
+            // Emit an early terminator so the descriptive comment ends up in its own
+            // batch, leaving the CREATE statement clean.
+            var isModuleCreate =
+                action.Type == MigrationActionType.CreateTrigger ||
+                action.Type == MigrationActionType.CreateProcedure ||
+                action.Type == MigrationActionType.CreateFunction;
+            if (isModuleCreate && !string.IsNullOrEmpty(dialect.StatementTerminator))
                 sb.AppendLine(dialect.StatementTerminator);
 
             sb.AppendLine(action.Sql);

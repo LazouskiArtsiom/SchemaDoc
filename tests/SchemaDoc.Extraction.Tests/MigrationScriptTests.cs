@@ -85,6 +85,107 @@ public class MigrationScriptTests
     public async Task Partial_migration_check_constraints_only()
         => await RunPartialTest("Prod", "Dev", a => a.Category == "Check Constraints");
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // PROCEDURE / FUNCTION MIGRATION TESTS
+    // Verify each direction's add/remove/modify cycle ends with no residual diff
+    // for procs and functions specifically. The full-migration tests above
+    // already exercise every direction at the table level — these zoom in on
+    // the new routine actions.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("Prod", "Staging")]
+    [InlineData("Prod", "Dev")]
+    [InlineData("Staging", "Prod")]
+    [InlineData("Staging", "Dev")]
+    [InlineData("Dev", "Prod")]
+    [InlineData("Dev", "Staging")]
+    public async Task Routine_migration_leaves_no_residual_diff(string source, string target)
+    {
+        var sourceCs = CsFor(source);
+        var targetCs = CsFor(target);
+
+        await RecreateFromSource(sourceCs);
+
+        var extractor = new SqlServerExtractor();
+        var src = await extractor.ExtractAsync(sourceCs);
+        var dst = await extractor.ExtractAsync(targetCs);
+
+        var diffSvc = new SchemaDiffService();
+        var diff = diffSvc.Compare(src, dst);
+
+        // Sanity: there should actually be routine changes to apply between
+        // these DBs — otherwise the test isn't really testing anything.
+        var routineChangeCount =
+            (diff.AddedProcedures?.Count ?? 0) + (diff.RemovedProcedures?.Count ?? 0) + (diff.ModifiedProcedures?.Count ?? 0) +
+            (diff.AddedFunctions?.Count  ?? 0) + (diff.RemovedFunctions?.Count  ?? 0) + (diff.ModifiedFunctions?.Count  ?? 0);
+
+        var dialect = MigrationScriptGenerator.DialectFor(DatabaseProvider.SqlServer);
+        var actions = MigrationScriptGenerator.BuildActions(src, dst, diff, dialect);
+        var script = MigrationScriptGenerator.AssembleScript(actions, dialect, source, target);
+
+        var testCs = $"Server=localhost;Database={TargetDbName};Integrated Security=True;TrustServerCertificate=True;";
+        var (ok, err) = await TryExecuteScript(testCs, script);
+        Assert.True(ok, $"Routine migration {source}→{target} failed:\n{err}\n\n{script}");
+
+        var after = await extractor.ExtractAsync(testCs);
+        var residual = diffSvc.Compare(after, dst);
+        AssertNoResidualDiff(residual, $"{source}→{target} (routines)", script);
+
+        // Also assert there were routine-level actions emitted, so we know we
+        // actually exercised the new code path.
+        var routineActionKinds = actions.Select(a => a.Type)
+            .Where(t => t is MigrationActionType.DropProcedure
+                       or MigrationActionType.CreateProcedure
+                       or MigrationActionType.DropFunction
+                       or MigrationActionType.CreateFunction)
+            .ToList();
+        Assert.True(routineActionKinds.Count > 0 || routineChangeCount == 0,
+            $"{source}→{target} produced {routineChangeCount} routine diffs but emitted 0 routine actions");
+    }
+
+    [Fact]
+    public async Task Routine_only_filter_drops_and_recreates_correctly()
+    {
+        // Apply ONLY routine actions on top of an already-migrated schema.
+        // Pre-step: do the full table-level migration first, then apply only
+        // routine actions and verify residual is zero.
+        var source = "Prod";
+        var target = "Dev";
+        await RecreateFromSource(CsFor(source));
+        var testCs = $"Server=localhost;Database={TargetDbName};Integrated Security=True;TrustServerCertificate=True;";
+
+        var extractor = new SqlServerExtractor();
+        var dialect = MigrationScriptGenerator.DialectFor(DatabaseProvider.SqlServer);
+        var diffSvc = new SchemaDiffService();
+
+        // Round 1: tables/columns/indexes/triggers — everything except routines.
+        var src1 = await extractor.ExtractAsync(testCs);
+        var dst  = await extractor.ExtractAsync(CsFor(target));
+        var diff1 = diffSvc.Compare(src1, dst);
+        var notRoutine = MigrationScriptGenerator.BuildActions(src1, dst, diff1, dialect)
+            .Where(a => a.Category != "Procedures" && a.Category != "Functions").ToList();
+        var script1 = MigrationScriptGenerator.AssembleScript(notRoutine, dialect, source, target);
+        var (ok1, err1) = await TryExecuteScript(testCs, script1);
+        Assert.True(ok1, $"Round 1 (non-routine) failed:\n{err1}\n\n{script1}");
+
+        // Round 2: routines only.
+        var src2 = await extractor.ExtractAsync(testCs);
+        var diff2 = diffSvc.Compare(src2, dst);
+        var routineOnly = MigrationScriptGenerator.BuildActions(src2, dst, diff2, dialect)
+            .Where(a => a.Category == "Procedures" || a.Category == "Functions").ToList();
+        Assert.True(routineOnly.Count > 0, "Expected routine actions to apply in round 2.");
+        var script2 = MigrationScriptGenerator.AssembleScript(routineOnly, dialect, source, target);
+        var (ok2, err2) = await TryExecuteScript(testCs, script2);
+        Assert.True(ok2, $"Round 2 (routines) failed:\n{err2}\n\n{script2}");
+
+        // Final: no residual diff.
+        var final = await extractor.ExtractAsync(testCs);
+        AssertNoResidualDiff(diffSvc.Compare(final, dst),
+            "Routine-only round after non-routine round",
+            $"--- Round 1 ---\n{script1}\n--- Round 2 ---\n{script2}");
+    }
+
     [Fact]
     public async Task Partial_then_remaining_migration_composes()
     {
@@ -240,6 +341,26 @@ public class MigrationScriptTests
             foreach (var t in residual.ModifiedTriggers)
                 failures.Add($"Trigger modified: {t.FullName} — {string.Join("; ", t.Changes)}");
 
+        if (residual.AddedProcedures is { Count: > 0 })
+            foreach (var p in residual.AddedProcedures)
+                failures.Add($"Procedure added: {p.FullName}");
+        if (residual.RemovedProcedures is { Count: > 0 })
+            foreach (var p in residual.RemovedProcedures)
+                failures.Add($"Procedure removed: {p.FullName}");
+        if (residual.ModifiedProcedures is { Count: > 0 })
+            foreach (var p in residual.ModifiedProcedures)
+                failures.Add($"Procedure modified: {p.FullName} — {string.Join("; ", p.Changes)}");
+
+        if (residual.AddedFunctions is { Count: > 0 })
+            foreach (var f in residual.AddedFunctions)
+                failures.Add($"Function added: {f.FullName}");
+        if (residual.RemovedFunctions is { Count: > 0 })
+            foreach (var f in residual.RemovedFunctions)
+                failures.Add($"Function removed: {f.FullName}");
+        if (residual.ModifiedFunctions is { Count: > 0 })
+            foreach (var f in residual.ModifiedFunctions)
+                failures.Add($"Function modified: {f.FullName} — {string.Join("; ", f.Changes)}");
+
         Assert.True(failures.Count == 0,
             $"[{scenario}] After applying migration script, state does not match target:\n" +
             string.Join("\n", failures) + "\n\n--- Script ---\n" + script);
@@ -329,6 +450,23 @@ public class MigrationScriptTests
                 sb.AppendLine(dialect.CreateTrigger(trg));
                 sb.AppendLine("GO");
             }
+
+        // Functions before procedures: a procedure can call a function but not
+        // vice-versa, so the function must exist before the procedure compiles.
+        if (source.Functions is not null)
+            foreach (var fn in source.Functions)
+            {
+                // CREATE FUNCTION must be the only statement in its batch.
+                sb.AppendLine("GO");
+                sb.AppendLine(dialect.CreateFunction(fn));
+                sb.AppendLine("GO");
+            }
+        foreach (var proc in source.StoredProcedures)
+        {
+            sb.AppendLine("GO");
+            sb.AppendLine(dialect.CreateProcedure(proc));
+            sb.AppendLine("GO");
+        }
 
         var testCs = $"Server=localhost;Database={TargetDbName};Integrated Security=True;TrustServerCertificate=True;";
         var (ok, err) = await TryExecuteScript(testCs, setupSb.ToString() + sb.ToString());

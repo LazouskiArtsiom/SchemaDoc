@@ -6,7 +6,10 @@ namespace SchemaDoc.Core.Services.Migration;
 /// </summary>
 public enum MigrationActionType
 {
-    // DROPs (run first, in this order)
+    // DROPs run first. Procedures/functions are dropped before everything else
+    // because they may bind to tables/columns we're about to alter or drop.
+    DropProcedure = 5,
+    DropFunction = 6,
     DropTrigger = 10,
     DropForeignKey = 20,
     DropCheckConstraint = 30,
@@ -25,7 +28,12 @@ public enum MigrationActionType
     AddCheckConstraint = 160,
     CreateIndex = 170,
     AddForeignKey = 180,
-    CreateTrigger = 190
+    CreateTrigger = 190,
+
+    // Functions before procedures: a procedure can call a function, but not vice
+    // versa, so functions need to exist first.
+    CreateFunction = 200,
+    CreateProcedure = 210
 }
 
 /// <summary>

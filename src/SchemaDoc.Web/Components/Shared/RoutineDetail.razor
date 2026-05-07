@@ -1,0 +1,157 @@
+@using SchemaDoc.Core.Models
+@inject SchemaDoc.Web.Services.SchemaSessionState State
+
+<div class="p-8">
+    <!-- Header / breadcrumb -->
+    <div class="mb-6">
+        <div class="flex items-center gap-2 text-sm text-gray-400 dark:text-gray-500 mb-1">
+            <span>@SchemaName</span>
+            <span>›</span>
+            <span class="font-medium text-gray-700 dark:text-gray-300">@Name</span>
+        </div>
+        <div class="flex items-center gap-3">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">@Name</h1>
+            <span class="text-xs uppercase tracking-wide bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full font-semibold">@KindLabel</span>
+        </div>
+        @if (!string.IsNullOrEmpty(ReturnType))
+        {
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Returns <span class="font-mono text-purple-600 dark:text-purple-400">@ReturnType</span>
+            </p>
+        }
+    </div>
+
+    <!-- Parameters -->
+    @if (Parameters is { Count: > 0 })
+    {
+        <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Parameters</h2>
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden mb-6">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                        <th class="text-left px-4 py-2 font-semibold text-gray-600 dark:text-gray-300">Name</th>
+                        <th class="text-left px-4 py-2 font-semibold text-gray-600 dark:text-gray-300">Type</th>
+                        <th class="text-left px-4 py-2 font-semibold text-gray-600 dark:text-gray-300">Direction</th>
+                        <th class="text-left px-4 py-2 font-semibold text-gray-600 dark:text-gray-300">Optional</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                    @foreach (var p in Parameters)
+                    {
+                        <tr>
+                            <td class="px-4 py-2 font-medium text-gray-800 dark:text-gray-100">@p.Name</td>
+                            <td class="px-4 py-2 font-mono text-xs text-purple-600 dark:text-purple-400">@p.DataType</td>
+                            <td class="px-4 py-2 text-gray-600 dark:text-gray-300">@p.Direction</td>
+                            <td class="px-4 py-2 text-gray-500 dark:text-gray-400">@(p.IsOptional ? "Yes" : "No")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <!-- Dependencies -->
+    @if (Dependencies is { Count: > 0 })
+    {
+        <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+            Dependencies <span class="font-normal text-gray-400 dark:text-gray-500 ml-1">(@Dependencies.Count)</span>
+        </h2>
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden mb-6">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+                    <tr>
+                        <th class="text-left px-4 py-2 font-semibold text-gray-600 dark:text-gray-300 w-24">Kind</th>
+                        <th class="text-left px-4 py-2 font-semibold text-gray-600 dark:text-gray-300">Object</th>
+                        <th class="text-left px-4 py-2 font-semibold text-gray-600 dark:text-gray-300">Column</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+                    @foreach (var d in Dependencies.OrderBy(d => d.Kind).ThenBy(d => d.ReferencedSchema).ThenBy(d => d.ReferencedObject).ThenBy(d => d.ReferencedColumn))
+                    {
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                            <td class="px-4 py-2">
+                                <span class="@DepKindClass(d.Kind) text-xs font-semibold px-1.5 py-0.5 rounded">@d.Kind</span>
+                            </td>
+                            <td class="px-4 py-2 text-gray-800 dark:text-gray-100">
+                                @{
+                                    var href = ResolveLink(d);
+                                }
+                                @if (href is not null)
+                                {
+                                    <a href="@href" class="text-blue-600 dark:text-blue-400 hover:underline">@FormatObject(d)</a>
+                                }
+                                else
+                                {
+                                    <span>@FormatObject(d)</span>
+                                }
+                            </td>
+                            <td class="px-4 py-2 text-gray-500 dark:text-gray-400 font-mono text-xs">@(d.ReferencedColumn ?? "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (Parameters is { Count: > 0 } || Definition is not null)
+    {
+        <p class="text-xs text-gray-400 dark:text-gray-500 mb-4 italic">
+            No tracked dependencies. (Dependency extraction is implemented for SQL Server only.)
+        </p>
+    }
+
+    <!-- Definition -->
+    @if (!string.IsNullOrWhiteSpace(Definition))
+    {
+        <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Definition</h2>
+        <pre class="bg-gray-900 dark:bg-black text-green-300 text-xs font-mono p-4 rounded-xl overflow-x-auto border border-gray-700 max-h-[60vh]">@Definition</pre>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string SchemaName { get; set; } = "";
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter, EditorRequired] public string KindLabel { get; set; } = "";
+    [Parameter] public string? ReturnType { get; set; }
+    [Parameter] public IReadOnlyList<ProcParameter>? Parameters { get; set; }
+    [Parameter] public IReadOnlyList<ObjectDependency>? Dependencies { get; set; }
+    [Parameter] public string? Definition { get; set; }
+
+    private static string DepKindClass(string kind) => kind switch
+    {
+        "Table"     => "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300",
+        "View"      => "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300",
+        "Function"  => "bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300",
+        "Procedure" => "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300",
+        _           => "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300",
+    };
+
+    private static string FormatObject(ObjectDependency d) =>
+        string.IsNullOrEmpty(d.ReferencedSchema)
+            ? d.ReferencedObject
+            : $"{d.ReferencedSchema}.{d.ReferencedObject}";
+
+    /// <summary>
+    /// Returns a navigable link for the dependency's referenced object when it
+    /// matches an object in the currently loaded schema. Cross-DB references
+    /// (no referenced_schema_name) and unknown types stay non-links.
+    /// </summary>
+    private string? ResolveLink(ObjectDependency d)
+    {
+        if (State.CurrentSchema is null || string.IsNullOrEmpty(d.ReferencedSchema))
+            return null;
+
+        var sch = Uri.EscapeDataString(d.ReferencedSchema);
+        var name = Uri.EscapeDataString(d.ReferencedObject);
+        return d.Kind switch
+        {
+            "Table"     => State.CurrentSchema.Tables.Any(t => t.Schema == d.ReferencedSchema && t.Name == d.ReferencedObject)
+                            ? $"/table/{sch}/{name}" : null,
+            "Function"  => (State.CurrentSchema.Functions ?? Array.Empty<SchemaFunction>())
+                            .Any(f => f.Schema == d.ReferencedSchema && f.Name == d.ReferencedObject)
+                            ? $"/function/{sch}/{name}" : null,
+            "Procedure" => State.CurrentSchema.StoredProcedures.Any(p => p.Schema == d.ReferencedSchema && p.Name == d.ReferencedObject)
+                            ? $"/proc/{sch}/{name}" : null,
+            _           => null
+        };
+    }
+}

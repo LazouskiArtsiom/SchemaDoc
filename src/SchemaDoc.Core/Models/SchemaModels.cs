@@ -16,7 +16,8 @@ public record DatabaseSchema(
     IReadOnlyList<SchemaView> Views,
     IReadOnlyList<StoredProcedure> StoredProcedures,
     IReadOnlyList<ForeignKeyRelation> ForeignKeys,
-    IReadOnlyList<SchemaTrigger>? Triggers = null
+    IReadOnlyList<SchemaTrigger>? Triggers = null,
+    IReadOnlyList<SchemaFunction>? Functions = null
 );
 
 public record SchemaTable(
@@ -136,7 +137,8 @@ public record StoredProcedure(
     string Schema,
     string Name,
     string? Definition,
-    IReadOnlyList<ProcParameter> Parameters
+    IReadOnlyList<ProcParameter> Parameters,
+    IReadOnlyList<ObjectDependency>? Dependencies = null
 )
 {
     public string FullName => $"{Schema}.{Name}";
@@ -147,4 +149,40 @@ public record ProcParameter(
     string DataType,
     string Direction,
     bool IsOptional
+);
+
+/// <summary>
+/// Type of database-callable routine. Procedures don't return a typed value;
+/// functions do (scalar, inline TVF, or multi-statement TVF).
+/// </summary>
+public enum FunctionKind
+{
+    Scalar,        // returns a single value
+    InlineTable,   // returns a table from a single SELECT
+    TableValued    // returns a table from a multi-statement body
+}
+
+public record SchemaFunction(
+    string Schema,
+    string Name,
+    FunctionKind Kind,
+    string? ReturnType,
+    string? Definition,
+    IReadOnlyList<ProcParameter> Parameters,
+    IReadOnlyList<ObjectDependency>? Dependencies = null
+)
+{
+    public string FullName => $"{Schema}.{Name}";
+}
+
+/// <summary>
+/// One object reference made by a procedure, function, view, or trigger.
+/// Column-level when <see cref="ReferencedColumn"/> is set; otherwise
+/// object-level. <see cref="Kind"/> distinguishes Table/View/Function/etc.
+/// </summary>
+public record ObjectDependency(
+    string ReferencedSchema,
+    string ReferencedObject,
+    string? ReferencedColumn,
+    string Kind   // "Table" | "View" | "Function" | "Procedure" | "Unknown"
 );

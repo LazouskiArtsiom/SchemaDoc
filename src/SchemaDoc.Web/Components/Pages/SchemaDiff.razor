@@ -175,6 +175,18 @@
                 {
                     <span class="bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-3 py-1 rounded-full font-medium">@((diffResult.AddedTriggers?.Count ?? 0) + (diffResult.RemovedTriggers?.Count ?? 0) + (diffResult.ModifiedTriggers?.Count ?? 0)) trigger(s) changed</span>
                 }
+                @{
+                    var procChanges = (diffResult.AddedProcedures?.Count ?? 0) + (diffResult.RemovedProcedures?.Count ?? 0) + (diffResult.ModifiedProcedures?.Count ?? 0);
+                    var fnChanges = (diffResult.AddedFunctions?.Count ?? 0) + (diffResult.RemovedFunctions?.Count ?? 0) + (diffResult.ModifiedFunctions?.Count ?? 0);
+                }
+                @if (procChanges > 0)
+                {
+                    <span class="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 px-3 py-1 rounded-full font-medium">@procChanges procedure(s) changed</span>
+                }
+                @if (fnChanges > 0)
+                {
+                    <span class="bg-pink-100 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 px-3 py-1 rounded-full font-medium">@fnChanges function(s) changed</span>
+                }
             </div>
 
             @if (diffResult.AddedTables.Count > 0)
@@ -497,6 +509,92 @@
                                 {
                                     <div class="text-xs text-amber-600 dark:text-amber-400">
                                         <span class="font-bold">~</span> <span class="font-medium">@trgDiff.FullName</span> — @change
+                                    </div>
+                                }
+                            }
+                        }
+                    </div>
+                </div>
+            }
+
+            @* ── Procedures ──────────────────────────────────────── *@
+            @if (procChanges > 0)
+            {
+                <div class="bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-800 rounded-xl mt-4 overflow-hidden">
+                    <div class="bg-amber-50 dark:bg-amber-900/30 px-4 py-3 border-b border-amber-100 dark:border-amber-800">
+                        <h2 class="text-sm font-semibold text-amber-700 dark:text-amber-300">Stored Procedures</h2>
+                    </div>
+                    <div class="px-6 py-3 space-y-1.5">
+                        @if (diffResult.AddedProcedures is not null)
+                        {
+                            foreach (var p in diffResult.AddedProcedures)
+                            {
+                                <div class="text-xs text-green-600 dark:text-green-400">
+                                    <span class="font-bold">+</span> <span class="font-medium">@p.FullName</span>
+                                    <span class="text-green-500 dark:text-green-500">(@p.Parameters.Count param(s))</span>
+                                </div>
+                            }
+                        }
+                        @if (diffResult.RemovedProcedures is not null)
+                        {
+                            foreach (var p in diffResult.RemovedProcedures)
+                            {
+                                <div class="text-xs text-red-600 dark:text-red-400">
+                                    <span class="font-bold">-</span> <span class="font-medium">@p.FullName</span>
+                                </div>
+                            }
+                        }
+                        @if (diffResult.ModifiedProcedures is not null)
+                        {
+                            foreach (var rd in diffResult.ModifiedProcedures)
+                            {
+                                foreach (var change in rd.Changes)
+                                {
+                                    <div class="text-xs text-amber-600 dark:text-amber-400">
+                                        <span class="font-bold">~</span> <span class="font-medium">@rd.FullName</span> — @change
+                                    </div>
+                                }
+                            }
+                        }
+                    </div>
+                </div>
+            }
+
+            @* ── Functions ────────────────────────────────────────── *@
+            @if (fnChanges > 0)
+            {
+                <div class="bg-white dark:bg-gray-800 border border-pink-200 dark:border-pink-800 rounded-xl mt-4 overflow-hidden">
+                    <div class="bg-pink-50 dark:bg-pink-900/30 px-4 py-3 border-b border-pink-100 dark:border-pink-800">
+                        <h2 class="text-sm font-semibold text-pink-700 dark:text-pink-300">Functions</h2>
+                    </div>
+                    <div class="px-6 py-3 space-y-1.5">
+                        @if (diffResult.AddedFunctions is not null)
+                        {
+                            foreach (var f in diffResult.AddedFunctions)
+                            {
+                                <div class="text-xs text-green-600 dark:text-green-400">
+                                    <span class="font-bold">+</span> <span class="font-medium">@f.FullName</span>
+                                    <span class="text-green-500 dark:text-green-500">[@f.Kind] returns @f.ReturnType</span>
+                                </div>
+                            }
+                        }
+                        @if (diffResult.RemovedFunctions is not null)
+                        {
+                            foreach (var f in diffResult.RemovedFunctions)
+                            {
+                                <div class="text-xs text-red-600 dark:text-red-400">
+                                    <span class="font-bold">-</span> <span class="font-medium">@f.FullName</span>
+                                </div>
+                            }
+                        }
+                        @if (diffResult.ModifiedFunctions is not null)
+                        {
+                            foreach (var rd in diffResult.ModifiedFunctions)
+                            {
+                                foreach (var change in rd.Changes)
+                                {
+                                    <div class="text-xs text-amber-600 dark:text-amber-400">
+                                        <span class="font-bold">~</span> <span class="font-medium">@rd.FullName</span> — @change
                                     </div>
                                 }
                             }

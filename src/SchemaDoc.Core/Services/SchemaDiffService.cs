@@ -57,14 +57,103 @@ public class SchemaDiffService
                 modifiedTriggers.Add(new TriggerDiff(key, changes));
         }
 
+        // Stored Procedures
+        var baselineProcs = baseline.StoredProcedures.ToDictionary(p => p.FullName, p => p);
+        var currentProcs = current.StoredProcedures.ToDictionary(p => p.FullName, p => p);
+        var addedProcs = currentProcs.Values
+            .Where(p => !baselineProcs.ContainsKey(p.FullName))
+            .OrderBy(p => p.FullName).ToList();
+        var removedProcs = baselineProcs.Values
+            .Where(p => !currentProcs.ContainsKey(p.FullName))
+            .OrderBy(p => p.FullName).ToList();
+        var modifiedProcs = new List<RoutineDiff>();
+        foreach (var key in baselineProcs.Keys.Where(k => currentProcs.ContainsKey(k)))
+        {
+            var changes = DiffProcedure(baselineProcs[key], currentProcs[key]);
+            if (changes.Count > 0)
+                modifiedProcs.Add(new RoutineDiff(key, changes));
+        }
+
+        // Functions
+        var baselineFns = (baseline.Functions ?? []).ToDictionary(f => f.FullName, f => f);
+        var currentFns = (current.Functions ?? []).ToDictionary(f => f.FullName, f => f);
+        var addedFns = currentFns.Values
+            .Where(f => !baselineFns.ContainsKey(f.FullName))
+            .OrderBy(f => f.FullName).ToList();
+        var removedFns = baselineFns.Values
+            .Where(f => !currentFns.ContainsKey(f.FullName))
+            .OrderBy(f => f.FullName).ToList();
+        var modifiedFns = new List<RoutineDiff>();
+        foreach (var key in baselineFns.Keys.Where(k => currentFns.ContainsKey(k)))
+        {
+            var changes = DiffFunction(baselineFns[key], currentFns[key]);
+            if (changes.Count > 0)
+                modifiedFns.Add(new RoutineDiff(key, changes));
+        }
+
         return new SchemaDiffResult(
             addedTables,
             removedTables,
             modifiedTables.OrderBy(t => t.FullName).ToList(),
             addedTriggers,
             removedTriggers,
-            modifiedTriggers.OrderBy(t => t.FullName).ToList()
+            modifiedTriggers.OrderBy(t => t.FullName).ToList(),
+            addedProcs,
+            removedProcs,
+            modifiedProcs.OrderBy(r => r.FullName).ToList(),
+            addedFns,
+            removedFns,
+            modifiedFns.OrderBy(r => r.FullName).ToList()
         );
+    }
+
+    private static List<string> DiffProcedure(StoredProcedure baseline, StoredProcedure current)
+    {
+        var changes = new List<string>();
+        DiffParameters(baseline.Parameters, current.Parameters, changes);
+        if (NormalizeSqlText(baseline.Definition) != NormalizeSqlText(current.Definition))
+            changes.Add("Definition changed");
+        return changes;
+    }
+
+    private static List<string> DiffFunction(SchemaFunction baseline, SchemaFunction current)
+    {
+        var changes = new List<string>();
+        if (baseline.Kind != current.Kind)
+            changes.Add($"Kind: {baseline.Kind} → {current.Kind}");
+        if (!StringsEq(baseline.ReturnType, current.ReturnType))
+            changes.Add($"Returns: {FormatVal(baseline.ReturnType)} → {FormatVal(current.ReturnType)}");
+        DiffParameters(baseline.Parameters, current.Parameters, changes);
+        if (NormalizeSqlText(baseline.Definition) != NormalizeSqlText(current.Definition))
+            changes.Add("Definition changed");
+        return changes;
+    }
+
+    /// <summary>Reports parameter list differences in order. Renames, additions, removals,
+    /// type/direction/optional changes are surfaced as one-line summaries.</summary>
+    private static void DiffParameters(IReadOnlyList<ProcParameter> baseline, IReadOnlyList<ProcParameter> current, List<string> changes)
+    {
+        var b = baseline.ToList();
+        var c = current.ToList();
+
+        if (b.Count != c.Count)
+            changes.Add($"Parameter count: {b.Count} → {c.Count}");
+
+        var max = Math.Max(b.Count, c.Count);
+        for (int i = 0; i < max; i++)
+        {
+            if (i >= b.Count) { changes.Add($"Param +{c[i].Name} ({c[i].DataType}, {c[i].Direction})"); continue; }
+            if (i >= c.Count) { changes.Add($"Param -{b[i].Name}"); continue; }
+            var bp = b[i]; var cp = c[i];
+            if (!string.Equals(bp.Name, cp.Name, StringComparison.OrdinalIgnoreCase))
+                changes.Add($"Param[{i}] name: {bp.Name} → {cp.Name}");
+            if (!string.Equals(bp.DataType, cp.DataType, StringComparison.OrdinalIgnoreCase))
+                changes.Add($"Param {cp.Name} type: {bp.DataType} → {cp.DataType}");
+            if (!string.Equals(bp.Direction, cp.Direction, StringComparison.OrdinalIgnoreCase))
+                changes.Add($"Param {cp.Name} direction: {bp.Direction} → {cp.Direction}");
+            if (bp.IsOptional != cp.IsOptional)
+                changes.Add($"Param {cp.Name} optional: {bp.IsOptional} → {cp.IsOptional}");
+        }
     }
 
     /// <summary>Groups flat FK rows by (parentSchema.parentTable) -> ForeignKeyGroup list.</summary>
@@ -440,7 +529,11 @@ public class SchemaDiffService
         // Strip block comments /* ... */
         s = System.Text.RegularExpressions.Regex.Replace(s, @"/\*.*?\*/", "", System.Text.RegularExpressions.RegexOptions.Singleline);
         // Collapse whitespace
-        return System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+        // Strip trailing semicolons + whitespace. The CREATE PROCEDURE / FUNCTION
+        // dialect renderer normalises a trailing ';', but the originally-extracted
+        // body in sys.sql_modules typically ends without one. Treat both as equal.
+        return s.TrimEnd(';', ' ');
     }
 
     private static string FormatIndexCol(IndexColumn c) => c.IsDescending ? $"{c.Name} DESC" : c.Name;

@@ -60,6 +60,9 @@ public class SqlServerExtractor : ISchemaExtractor
         var views = (await conn.QueryAsync<RawView>(ViewsQuery)).ToList();
         var procs = (await conn.QueryAsync<RawProc>(ProcsQuery)).ToList();
         var procParams = (await conn.QueryAsync<RawProcParam>(ProcParamsQuery)).ToList();
+        var funcs = (await conn.QueryAsync<RawFunction>(FunctionsQuery)).ToList();
+        var funcParams = (await conn.QueryAsync<RawFuncParam>(FunctionParamsQuery)).ToList();
+        var deps = (await conn.QueryAsync<RawDependency>(DependenciesQuery)).ToList();
         var rowCounts = (await conn.QueryAsync<RawRowCount>(RowCountsQuery))
             .ToDictionary(r => (r.SchemaName, r.TableName), r => r.RowCount);
 
@@ -72,9 +75,10 @@ public class SqlServerExtractor : ISchemaExtractor
 
         var tables = BuildTables(columns, fks, rowCounts, primaryKeys, uniqueConstraints, checkConstraints, indexes);
         var schemaViews = BuildViews(views);
-        var storedProcs = BuildProcs(procs, procParams);
+        var storedProcs = BuildProcs(procs, procParams, deps);
         var foreignKeys = BuildForeignKeys(fks);
         var triggerList = BuildTriggers(triggers);
+        var functionList = BuildFunctions(funcs, funcParams, deps);
 
         return new DatabaseSchema(
             DatabaseName: dbName,
@@ -84,7 +88,8 @@ public class SqlServerExtractor : ISchemaExtractor
             Views: schemaViews,
             StoredProcedures: storedProcs,
             ForeignKeys: foreignKeys,
-            Triggers: triggerList
+            Triggers: triggerList,
+            Functions: functionList
         );
     }
 
@@ -229,11 +234,16 @@ public class SqlServerExtractor : ISchemaExtractor
             .ToList();
     }
 
-    private static List<StoredProcedure> BuildProcs(List<RawProc> procs, List<RawProcParam> procParams)
+    private static List<StoredProcedure> BuildProcs(List<RawProc> procs, List<RawProcParam> procParams, List<RawDependency> deps)
     {
         var paramsByProc = procParams
             .GroupBy(p => (p.SchemaName, p.ProcName))
             .ToDictionary(g => g.Key, g => g.ToList());
+
+        var depsByObj = deps
+            .Where(d => d.RoutineKind == "P")
+            .GroupBy(d => (d.RoutineSchema, d.RoutineName))
+            .ToDictionary(g => g.Key, g => g.Select(MapDep).ToList());
 
         return procs.Select(p =>
         {
@@ -247,11 +257,57 @@ public class SqlServerExtractor : ISchemaExtractor
                 )).ToList()
                 : new List<ProcParameter>();
 
-            return new StoredProcedure(p.SchemaName, p.ProcName, p.Definition, parameters);
+            var dependencies = depsByObj.TryGetValue(key, out var ds) ? ds : null;
+            return new StoredProcedure(p.SchemaName, p.ProcName, p.Definition, parameters, dependencies);
         })
         .OrderBy(p => p.Schema).ThenBy(p => p.Name)
         .ToList();
     }
+
+    private static List<SchemaFunction> BuildFunctions(List<RawFunction> funcs, List<RawFuncParam> funcParams, List<RawDependency> deps)
+    {
+        var paramsByFn = funcParams
+            .GroupBy(p => (p.SchemaName, p.FuncName))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var depsByObj = deps
+            .Where(d => d.RoutineKind == "FN" || d.RoutineKind == "IF" || d.RoutineKind == "TF")
+            .GroupBy(d => (d.RoutineSchema, d.RoutineName))
+            .ToDictionary(g => g.Key, g => g.Select(MapDep).ToList());
+
+        return funcs.Select(f =>
+        {
+            var key = (f.SchemaName, f.FuncName);
+            var parameters = paramsByFn.TryGetValue(key, out var ps)
+                ? ps.Select(param => new ProcParameter(
+                    Name: param.ParamName,
+                    DataType: param.DataType,
+                    Direction: param.IsOutput ? "OUT" : "IN",
+                    IsOptional: param.HasDefaultValue
+                )).ToList()
+                : new List<ProcParameter>();
+
+            var kind = f.TypeCode switch
+            {
+                "FN" => FunctionKind.Scalar,
+                "IF" => FunctionKind.InlineTable,
+                "TF" => FunctionKind.TableValued,
+                _    => FunctionKind.Scalar
+            };
+            var dependencies = depsByObj.TryGetValue(key, out var ds) ? ds : null;
+            return new SchemaFunction(f.SchemaName, f.FuncName, kind, f.ReturnType, f.Definition, parameters, dependencies);
+        })
+        .OrderBy(f => f.Schema).ThenBy(f => f.Name)
+        .ToList();
+    }
+
+    private static ObjectDependency MapDep(RawDependency d) =>
+        new(
+            ReferencedSchema: d.ReferencedSchema ?? "",
+            ReferencedObject: d.ReferencedObject ?? "",
+            ReferencedColumn: string.IsNullOrEmpty(d.ReferencedColumn) ? null : d.ReferencedColumn,
+            Kind: d.ReferencedKind ?? "Unknown"
+        );
 
     private static List<ForeignKeyRelation> BuildForeignKeys(List<RawForeignKey> fks) =>
         fks.Select(f => new ForeignKeyRelation(
@@ -399,6 +455,36 @@ public class SqlServerExtractor : ISchemaExtractor
         public string EventType { get; set; } = "";
         public string Timing { get; set; } = "";
         public string? Definition { get; set; }
+    }
+
+    private class RawFunction
+    {
+        public string SchemaName { get; set; } = "";
+        public string FuncName { get; set; } = "";
+        public string TypeCode { get; set; } = "";   // "FN" | "IF" | "TF"
+        public string? ReturnType { get; set; }
+        public string? Definition { get; set; }
+    }
+
+    private class RawFuncParam
+    {
+        public string SchemaName { get; set; } = "";
+        public string FuncName { get; set; } = "";
+        public string ParamName { get; set; } = "";
+        public string DataType { get; set; } = "";
+        public bool IsOutput { get; set; }
+        public bool HasDefaultValue { get; set; }
+    }
+
+    private class RawDependency
+    {
+        public string RoutineSchema { get; set; } = "";
+        public string RoutineName { get; set; } = "";
+        public string RoutineKind { get; set; } = "";    // "P" | "FN" | "IF" | "TF"
+        public string? ReferencedSchema { get; set; }
+        public string? ReferencedObject { get; set; }
+        public string? ReferencedColumn { get; set; }
+        public string? ReferencedKind { get; set; }      // "Table"|"View"|"Function"|"Procedure"|"Unknown"
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
@@ -590,6 +676,89 @@ public class SqlServerExtractor : ISchemaExtractor
         JOIN sys.columns c          ON c.object_id = ic.object_id AND c.column_id = ic.column_id
         WHERE idx.name IS NOT NULL
         ORDER BY s.name, t.name, idx.name, ic.is_included_column, ic.key_ordinal
+        """;
+
+    private const string FunctionsQuery = """
+        SELECT
+            s.name              AS SchemaName,
+            o.name              AS FuncName,
+            RTRIM(o.type)       AS TypeCode,
+            CASE
+                WHEN o.type = 'FN' THEN tp.name
+                                + CASE WHEN tp.name IN ('decimal','numeric')
+                                        THEN '(' + CAST(rt.precision AS VARCHAR(10)) + ',' + CAST(rt.scale AS VARCHAR(10)) + ')'
+                                       WHEN tp.name IN ('varchar','nvarchar','char','nchar','varbinary','binary')
+                                        THEN '(' + CASE WHEN rt.max_length = -1 THEN 'MAX'
+                                                        WHEN tp.name LIKE 'n%' THEN CAST(rt.max_length / 2 AS VARCHAR(10))
+                                                        ELSE CAST(rt.max_length AS VARCHAR(10))
+                                                   END + ')'
+                                       ELSE '' END
+                ELSE 'TABLE'
+            END                 AS ReturnType,
+            sm.definition       AS Definition
+        FROM sys.objects o
+        JOIN sys.schemas s     ON o.schema_id = s.schema_id
+        LEFT JOIN sys.sql_modules sm ON sm.object_id = o.object_id
+        OUTER APPLY (
+            SELECT TOP 1 user_type_id, max_length, precision, scale
+            FROM sys.parameters p
+            WHERE p.object_id = o.object_id AND p.is_output = 1 AND p.parameter_id = 0
+        ) rt
+        LEFT JOIN sys.types tp  ON tp.user_type_id = rt.user_type_id
+        WHERE o.type IN ('FN','IF','TF')
+          AND o.is_ms_shipped = 0
+        ORDER BY s.name, o.name
+        """;
+
+    private const string FunctionParamsQuery = """
+        SELECT
+            s.name              AS SchemaName,
+            o.name              AS FuncName,
+            param.name          AS ParamName,
+            tp.name             AS DataType,
+            param.is_output     AS IsOutput,
+            param.has_default_value AS HasDefaultValue
+        FROM sys.objects o
+        JOIN sys.schemas s          ON o.schema_id = s.schema_id
+        JOIN sys.parameters param   ON o.object_id = param.object_id
+        JOIN sys.types tp           ON param.user_type_id = tp.user_type_id
+        WHERE o.type IN ('FN','IF','TF')
+          AND o.is_ms_shipped = 0
+          AND param.parameter_id > 0     -- skip the function's return value (parameter_id = 0)
+        ORDER BY s.name, o.name, param.parameter_id
+        """;
+
+    /// <summary>
+    /// Extracts what each procedure/function references — at column granularity when known.
+    /// Uses sys.sql_expression_dependencies which is the recommended catalog (sys.dm_sql_referenced_entities
+    /// is per-object and would require N executions). Cross-DB references show NULL referenced_schema_name.
+    /// </summary>
+    private const string DependenciesQuery = """
+        SELECT
+            rs.name                  AS RoutineSchema,
+            ro.name                  AS RoutineName,
+            RTRIM(ro.type)           AS RoutineKind,    -- 'P' | 'FN' | 'IF' | 'TF'
+            d.referenced_schema_name AS ReferencedSchema,
+            d.referenced_entity_name AS ReferencedObject,
+            ref_c.name               AS ReferencedColumn,
+            CASE
+                WHEN ref_o.type = 'U' THEN 'Table'
+                WHEN ref_o.type = 'V' THEN 'View'
+                WHEN ref_o.type IN ('FN','IF','TF') THEN 'Function'
+                WHEN ref_o.type = 'P' THEN 'Procedure'
+                ELSE 'Unknown'
+            END                      AS ReferencedKind
+        FROM sys.sql_expression_dependencies d
+        JOIN sys.objects ro          ON ro.object_id = d.referencing_id
+        JOIN sys.schemas rs          ON ro.schema_id = rs.schema_id
+        LEFT JOIN sys.objects ref_o  ON ref_o.object_id = d.referenced_id
+        LEFT JOIN sys.columns ref_c
+            ON  ref_c.object_id = d.referenced_id
+            AND ref_c.column_id = d.referenced_minor_id
+            AND d.referenced_minor_id > 0
+        WHERE ro.type IN ('P','FN','IF','TF')
+          AND ro.is_ms_shipped = 0
+        ORDER BY rs.name, ro.name, d.referenced_entity_name, ref_c.column_id
         """;
 
     private const string TriggersQuery = """

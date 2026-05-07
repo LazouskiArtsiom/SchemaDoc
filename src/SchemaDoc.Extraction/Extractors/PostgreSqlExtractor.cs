@@ -57,6 +57,7 @@ public class PostgreSqlExtractor : ISchemaExtractor
         var views = (await conn.QueryAsync<RawView>(ViewsQuery)).ToList();
         var procs = (await conn.QueryAsync<RawProc>(ProcsQuery)).ToList();
         var procParams = (await conn.QueryAsync<RawProcParam>(ProcParamsQuery)).ToList();
+        var funcs = (await conn.QueryAsync<RawFunctionPg>(FunctionsQueryPg)).ToList();
 
         // Step 1 enhanced diff data
         var primaryKeys = (await conn.QueryAsync<RawPkColumn>(PrimaryKeysQuery)).ToList();
@@ -70,6 +71,7 @@ public class PostgreSqlExtractor : ISchemaExtractor
         var storedProcs = BuildProcs(procs, procParams);
         var foreignKeys = BuildForeignKeys(fks);
         var triggerList = BuildTriggers(triggers);
+        var functionList = BuildFunctions(funcs, funcParams: procParams);
 
         return new DatabaseSchema(
             DatabaseName: dbName,
@@ -79,8 +81,44 @@ public class PostgreSqlExtractor : ISchemaExtractor
             Views: schemaViews,
             StoredProcedures: storedProcs,
             ForeignKeys: foreignKeys,
-            Triggers: triggerList
+            Triggers: triggerList,
+            Functions: functionList
         );
+    }
+
+    /// <summary>
+    /// Builds <see cref="SchemaFunction"/> rows for PG. Parameter list is shared with
+    /// procedures because <c>information_schema.parameters</c> covers both. Dependency
+    /// extraction is not yet implemented for PG.
+    /// </summary>
+    private static List<SchemaFunction> BuildFunctions(List<RawFunctionPg> funcs, List<RawProcParam> funcParams)
+    {
+        var paramsByFn = funcParams
+            .GroupBy(p => (p.SchemaName, p.ProcName))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        return funcs.Select(f =>
+        {
+            var key = (f.SchemaName, f.FuncName);
+            var parameters = paramsByFn.TryGetValue(key, out var ps)
+                ? ps.Select(param => new ProcParameter(
+                    Name: param.ParamName,
+                    DataType: param.DataType,
+                    Direction: param.ParameterMode switch { "OUT" => "OUT", "INOUT" => "INOUT", _ => "IN" },
+                    IsOptional: param.HasDefault
+                )).ToList()
+                : new List<ProcParameter>();
+
+            // PG functions returning a table show up as 'USER-DEFINED' or composite — surface as-is.
+            var kind = f.ReturnType?.Equals("record", StringComparison.OrdinalIgnoreCase) == true
+                       || f.ReturnType?.Contains("table", StringComparison.OrdinalIgnoreCase) == true
+                ? FunctionKind.TableValued
+                : FunctionKind.Scalar;
+
+            return new SchemaFunction(f.SchemaName, f.FuncName, kind, f.ReturnType, f.Definition, parameters, Dependencies: null);
+        })
+        .OrderBy(f => f.Schema).ThenBy(f => f.Name)
+        .ToList();
     }
 
     // ── Build helpers ────────────────────────────────────────────────────────
@@ -306,6 +344,14 @@ public class PostgreSqlExtractor : ISchemaExtractor
         public string? Definition { get; set; }
     }
 
+    private class RawFunctionPg
+    {
+        public string SchemaName { get; set; } = "";
+        public string FuncName { get; set; } = "";
+        public string? ReturnType { get; set; }
+        public string? Definition { get; set; }
+    }
+
     private class RawProcParam
     {
         public string SchemaName { get; set; } = "";
@@ -455,6 +501,9 @@ public class PostgreSqlExtractor : ISchemaExtractor
         ORDER BY v.table_schema, v.table_name, c.ordinal_position
         """;
 
+    // NOTE: dependency extraction is not implemented for PostgreSQL — pg_depend tracks
+    // function references at object granularity but column-level requires parsing the body.
+    // Functions are extracted but split out of the procedure list below using routine_type.
     private const string ProcsQuery = """
         SELECT
             r.routine_schema                            AS SchemaName,
@@ -462,7 +511,19 @@ public class PostgreSqlExtractor : ISchemaExtractor
             r.routine_definition                        AS Definition
         FROM information_schema.routines r
         WHERE r.routine_schema NOT IN ('pg_catalog', 'information_schema')
-          AND r.routine_type IN ('PROCEDURE', 'FUNCTION')
+          AND r.routine_type = 'PROCEDURE'
+        ORDER BY r.routine_schema, r.routine_name
+        """;
+
+    private const string FunctionsQueryPg = """
+        SELECT
+            r.routine_schema                            AS SchemaName,
+            r.routine_name                              AS FuncName,
+            r.data_type                                 AS ReturnType,
+            r.routine_definition                        AS Definition
+        FROM information_schema.routines r
+        WHERE r.routine_schema NOT IN ('pg_catalog', 'information_schema')
+          AND r.routine_type = 'FUNCTION'
         ORDER BY r.routine_schema, r.routine_name
         """;
 

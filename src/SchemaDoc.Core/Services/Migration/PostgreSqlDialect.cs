@@ -163,6 +163,19 @@ public class PostgreSqlDialect : ISqlDialect
     public string DropTrigger(SchemaTrigger trg)
         => $"DROP TRIGGER {QuoteId(trg.Name)} ON {QuoteSchemaTable(trg.TableSchema, trg.TableName)};";
 
+    // ── Procedures and functions: not supported for migration on PostgreSQL ──
+    // The diff service detects proc/function changes, but the migration script
+    // generator skips them for non-SQL-Server dialects (see DialectFor caller).
+    // Throwing surfaces accidental misuse loudly rather than emitting bad SQL.
+    public string CreateProcedure(StoredProcedure proc)
+        => throw new NotSupportedException("Procedure migration is implemented for SQL Server only.");
+    public string DropProcedure(StoredProcedure proc)
+        => throw new NotSupportedException("Procedure migration is implemented for SQL Server only.");
+    public string CreateFunction(SchemaFunction fn)
+        => throw new NotSupportedException("Function migration is implemented for SQL Server only.");
+    public string DropFunction(SchemaFunction fn)
+        => throw new NotSupportedException("Function migration is implemented for SQL Server only.");
+
     private static string? MapAction(string? action) => action?.ToUpperInvariant() switch
     {
         null or "" or "NO ACTION" or "NO_ACTION" => null,
