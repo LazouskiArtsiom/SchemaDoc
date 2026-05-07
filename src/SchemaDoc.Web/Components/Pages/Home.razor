@@ -216,6 +216,9 @@
     private string snapshotName = "";
     private string snapshotNotes = "";
     private string? snapshotMessage;
+    // Tracks which DB the form was opened for, so we can close it when the
+    // user switches databases — its bound fields belong to the old DB.
+    private string? snapshotFormOwnerDb;
 
     private bool showTagEditor;
     private string? editTag;
@@ -259,12 +262,19 @@
 
     private void OnStateChanged() => InvokeAsync(async () =>
     {
-        // If the user switched to a different database, close the tag editor —
-        // its bound fields belonged to the old database.
+        // If the user switched to a different database, close the tag editor and
+        // the Save Snapshot form — both have fields bound to the old DB.
         if (showTagEditor && editorOwnerDb != State.ActiveDatabase)
         {
             showTagEditor = false;
             editorOwnerDb = null;
+        }
+        if (showSaveSnapshot && snapshotFormOwnerDb != State.ActiveDatabase)
+        {
+            showSaveSnapshot = false;
+            snapshotFormOwnerDb = null;
+            snapshotName = "";
+            snapshotNotes = "";
         }
         await LoadTagOverrideAsync();
         StateHasChanged();
@@ -328,9 +338,21 @@
         showSaveSnapshot = !showSaveSnapshot;
         if (showSaveSnapshot)
         {
-            snapshotName = "";
+            // Pre-fill the name as "{server}/{db}/{yyyy-MM-dd HH:mm}". Re-computed
+            // on every open so it always reflects the current connection + the
+            // moment the user actually clicks Save Snapshot. The user is free to
+            // overwrite it with anything they prefer before saving.
+            var server = State.ActiveConnection?.Name ?? "";
+            var db = State.ActiveDatabase ?? "";
+            var stamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+            snapshotName = $"{server}/{db}/{stamp}";
             snapshotNotes = "";
             snapshotMessage = null;
+            snapshotFormOwnerDb = State.ActiveDatabase;
+        }
+        else
+        {
+            snapshotFormOwnerDb = null;
         }
     }
 
