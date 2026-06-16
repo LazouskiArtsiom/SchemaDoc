@@ -18,28 +18,30 @@ public class SqlServerExtractor : ISchemaExtractor
     public async Task<IReadOnlyList<string>> ListDatabasesAsync(string connectionString, CancellationToken ct = default)
     {
         // Connect to master so we can enumerate databases regardless of the original Initial Catalog.
+        // Exceptions intentionally propagate: a failure here (master rejected, firewall, auth)
+        // is a real error the UI should show. The previous catch swallowed everything and returned
+        // an empty list, which surfaced as a misleading "No databases visible to this user." Both
+        // callers (Connections.ConnectAsync, Sidebar.ToggleServerAsync) already surface the message.
         var rerouted = SwitchDatabase(connectionString, "master");
-        try
-        {
-            await using var conn = new SqlConnection(rerouted);
-            await conn.OpenAsync(ct);
-            // Skip system DBs but always include the originally targeted DB if it's accessible.
-            var dbs = (await conn.QueryAsync<string>(
-                """
-                SELECT name FROM sys.databases
-                WHERE database_id > 4   -- master, tempdb, model, msdb
-                  AND state = 0          -- ONLINE
-                  AND HAS_DBACCESS(name) = 1
-                ORDER BY name
-                """)).ToList();
-            return dbs;
-        }
-        catch
-        {
-            // User may not have permission to query master — fall back to whatever DB they targeted.
-            var builder = new SqlConnectionStringBuilder(connectionString);
-            return string.IsNullOrEmpty(builder.InitialCatalog) ? [] : [builder.InitialCatalog];
-        }
+        await using var conn = new SqlConnection(rerouted);
+        await conn.OpenAsync(ct);
+
+        // EngineEdition 5 = Azure SQL Database, where every database is an isolated container.
+        // HAS_DBACCESS evaluated from the master connection returns 0 for every *sibling* database
+        // there, so the filter wrongly hides everything (the bug that showed "No databases visible"
+        // against Azure SQL). sys.databases visibility on Azure SQL Database already scopes the list
+        // to what the principal can see, so we drop the HAS_DBACCESS predicate for edition 5.
+        // On-prem / IaaS (3) and Managed Instance (8) keep it — they have a real shared master where
+        // the cross-database access check works, so behavior there is unchanged.
+        var dbs = (await conn.QueryAsync<string>(
+            """
+            SELECT name FROM sys.databases
+            WHERE database_id > 4   -- skip master, tempdb, model, msdb
+              AND state = 0          -- ONLINE
+              AND (CAST(SERVERPROPERTY('EngineEdition') AS int) = 5 OR HAS_DBACCESS(name) = 1)
+            ORDER BY name
+            """)).ToList();
+        return dbs;
     }
 
     public string SwitchDatabase(string connectionString, string databaseName)
