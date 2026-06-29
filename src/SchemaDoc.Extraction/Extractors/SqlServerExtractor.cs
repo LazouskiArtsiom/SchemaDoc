@@ -50,6 +50,13 @@ public class SqlServerExtractor : ISchemaExtractor
         return builder.ConnectionString;
     }
 
+    /// <summary>
+    /// Per-query timeout for schema extraction. Large databases (many objects, slow
+    /// metadata catalogs on Azure) can take well over Dapper's 30s default, so allow
+    /// up to 5 minutes per query before giving up.
+    /// </summary>
+    private const int SchemaReadTimeoutSeconds = 300;
+
     public async Task<DatabaseSchema> ExtractAsync(string connectionString, CancellationToken ct = default)
     {
         await using var conn = new SqlConnection(connectionString);
@@ -57,23 +64,24 @@ public class SqlServerExtractor : ISchemaExtractor
 
         var dbName = conn.Database;
 
-        var columns = (await conn.QueryAsync<RawColumn>(ColumnsQuery)).ToList();
-        var fks = (await conn.QueryAsync<RawForeignKey>(ForeignKeysQuery)).ToList();
-        var views = (await conn.QueryAsync<RawView>(ViewsQuery)).ToList();
-        var procs = (await conn.QueryAsync<RawProc>(ProcsQuery)).ToList();
-        var procParams = (await conn.QueryAsync<RawProcParam>(ProcParamsQuery)).ToList();
-        var funcs = (await conn.QueryAsync<RawFunction>(FunctionsQuery)).ToList();
-        var funcParams = (await conn.QueryAsync<RawFuncParam>(FunctionParamsQuery)).ToList();
-        var deps = (await conn.QueryAsync<RawDependency>(DependenciesQuery)).ToList();
-        var rowCounts = (await conn.QueryAsync<RawRowCount>(RowCountsQuery))
+        const int t = SchemaReadTimeoutSeconds;
+        var columns = (await conn.QueryAsync<RawColumn>(ColumnsQuery, commandTimeout: t)).ToList();
+        var fks = (await conn.QueryAsync<RawForeignKey>(ForeignKeysQuery, commandTimeout: t)).ToList();
+        var views = (await conn.QueryAsync<RawView>(ViewsQuery, commandTimeout: t)).ToList();
+        var procs = (await conn.QueryAsync<RawProc>(ProcsQuery, commandTimeout: t)).ToList();
+        var procParams = (await conn.QueryAsync<RawProcParam>(ProcParamsQuery, commandTimeout: t)).ToList();
+        var funcs = (await conn.QueryAsync<RawFunction>(FunctionsQuery, commandTimeout: t)).ToList();
+        var funcParams = (await conn.QueryAsync<RawFuncParam>(FunctionParamsQuery, commandTimeout: t)).ToList();
+        var deps = (await conn.QueryAsync<RawDependency>(DependenciesQuery, commandTimeout: t)).ToList();
+        var rowCounts = (await conn.QueryAsync<RawRowCount>(RowCountsQuery, commandTimeout: t))
             .ToDictionary(r => (r.SchemaName, r.TableName), r => r.RowCount);
 
         // Step 1 enhanced diff data
-        var primaryKeys = (await conn.QueryAsync<RawPkColumn>(PrimaryKeysQuery)).ToList();
-        var uniqueConstraints = (await conn.QueryAsync<RawUniqueColumn>(UniqueConstraintsQuery)).ToList();
-        var checkConstraints = (await conn.QueryAsync<RawCheck>(CheckConstraintsQuery)).ToList();
-        var indexes = (await conn.QueryAsync<RawIndexColumn>(IndexesQuery)).ToList();
-        var triggers = (await conn.QueryAsync<RawTrigger>(TriggersQuery)).ToList();
+        var primaryKeys = (await conn.QueryAsync<RawPkColumn>(PrimaryKeysQuery, commandTimeout: t)).ToList();
+        var uniqueConstraints = (await conn.QueryAsync<RawUniqueColumn>(UniqueConstraintsQuery, commandTimeout: t)).ToList();
+        var checkConstraints = (await conn.QueryAsync<RawCheck>(CheckConstraintsQuery, commandTimeout: t)).ToList();
+        var indexes = (await conn.QueryAsync<RawIndexColumn>(IndexesQuery, commandTimeout: t)).ToList();
+        var triggers = (await conn.QueryAsync<RawTrigger>(TriggersQuery, commandTimeout: t)).ToList();
 
         var tables = BuildTables(columns, fks, rowCounts, primaryKeys, uniqueConstraints, checkConstraints, indexes);
         var schemaViews = BuildViews(views);

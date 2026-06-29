@@ -287,6 +287,19 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
                 Snapshots
+                @if (State.ActiveDatabase is not null)
+                {
+                    <span class="ml-auto text-[10px] text-gray-400 dark:text-gray-500 truncate max-w-[90px]">@State.ActiveDatabase</span>
+                }
+            </a>
+            <a href="/server-snapshots"
+               class="flex items-center gap-2 px-3 py-2 text-sm text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 rounded-lg no-underline font-medium">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M5 12a7 7 0 0114 0M5 12a7 7 0 0014 0M5 12H3m18 0h-2M12 5V3m0 18v-2" />
+                    <rect x="9" y="9" width="6" height="6" rx="1" stroke-width="2" />
+                </svg>
+                All server snapshots
             </a>
         </div>
     }

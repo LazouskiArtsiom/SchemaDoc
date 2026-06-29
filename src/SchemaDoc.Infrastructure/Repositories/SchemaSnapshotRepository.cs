@@ -65,7 +65,42 @@ public class SchemaSnapshotRepository(AppDbContext db) : ISchemaSnapshotReposito
     {
         var rows = await db.SchemaSnapshots
             .Where(s => s.ConnectionId == connectionId && s.DatabaseName == databaseName)
+            // Id as a tie-breaker so "freshest" is deterministic when two snapshots
+            // share an ExtractedAt (it comes from schema.ExtractedAt, not insert time).
             .OrderByDescending(s => s.ExtractedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => new
+            {
+                s.Id,
+                s.ConnectionId,
+                ConnectionName = s.Connection.Name,
+                s.DatabaseName,
+                s.ExtractedAt,
+                s.Name,
+                s.Notes,
+                s.SchemaJson
+            })
+            .ToListAsync();
+
+        return rows.Select(r => new SnapshotSummary(
+            r.Id, r.ConnectionId, r.ConnectionName, r.DatabaseName,
+            r.ExtractedAt, r.Name, r.Notes,
+            CountTables(r.SchemaJson))).ToList();
+    }
+
+    public async Task<int> GetCountAsync(int connectionId, string databaseName)
+    {
+        return await db.SchemaSnapshots
+            .CountAsync(s => s.ConnectionId == connectionId && s.DatabaseName == databaseName);
+    }
+
+    public async Task<IReadOnlyList<SnapshotSummary>> GetByConnectionAsync(int connectionId)
+    {
+        var rows = await db.SchemaSnapshots
+            .Where(s => s.ConnectionId == connectionId)
+            .OrderBy(s => s.DatabaseName)
+            .ThenByDescending(s => s.ExtractedAt)
+            .ThenByDescending(s => s.Id)
             .Select(s => new
             {
                 s.Id,

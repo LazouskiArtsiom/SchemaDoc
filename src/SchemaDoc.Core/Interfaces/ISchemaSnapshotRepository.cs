@@ -19,6 +19,12 @@ public interface ISchemaSnapshotRepository
 
     Task<IReadOnlyList<SnapshotSummary>> GetSnapshotListAsync(int connectionId, string databaseName);
 
+    /// <summary>Cheap count of snapshots for (connection, database) — no JSON materialised.</summary>
+    Task<int> GetCountAsync(int connectionId, string databaseName);
+
+    /// <summary>All snapshots for one connection (server), across every database. For the server snapshots page.</summary>
+    Task<IReadOnlyList<SnapshotSummary>> GetByConnectionAsync(int connectionId);
+
     /// <summary>All snapshots across all connections + databases. For the management page and the diff picker.</summary>
     Task<IReadOnlyList<SnapshotSummary>> GetAllAsync();
 

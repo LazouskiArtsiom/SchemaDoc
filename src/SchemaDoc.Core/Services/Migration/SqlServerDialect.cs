@@ -150,7 +150,15 @@ public class SqlServerDialect : ISqlDialect
             ? " INCLUDE (" + string.Join(", ", ix.IncludedColumns.Select(QuoteId)) + ")"
             : "";
         var filter = !string.IsNullOrEmpty(ix.FilterExpression) ? $" WHERE {ix.FilterExpression}" : "";
-        return $"CREATE {unique}{kind}INDEX {QuoteId(ix.Name)} ON {QuoteSchemaTable(table.Schema, table.Name)} ({cols}){include}{filter};";
+        // WITH (ONLINE = ON) builds the index without taking a long table lock, so the
+        // table stays queryable during the migration. Requires SQL Server Enterprise or
+        // Azure SQL Database — it errors on Standard/Express editions.
+        // Only valid for plain rowstore indexes: columnstore, XML, spatial and hash
+        // indexes reject the ONLINE clause outright, so never emit it for those.
+        var typeUpper = (ix.IndexType ?? "").ToUpperInvariant();
+        var isRowstore = typeUpper is "" or "CLUSTERED" or "NONCLUSTERED";
+        var online = isRowstore ? " WITH (ONLINE = ON)" : "";
+        return $"CREATE {unique}{kind}INDEX {QuoteId(ix.Name)} ON {QuoteSchemaTable(table.Schema, table.Name)} ({cols}){include}{filter}{online};";
     }
 
     public string DropIndex(SchemaTable table, SchemaIndex ix)

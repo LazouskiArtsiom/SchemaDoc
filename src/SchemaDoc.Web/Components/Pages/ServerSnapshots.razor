@@ -1,0 +1,106 @@
+@page "/server-snapshots"
+@layout SchemaDoc.Web.Components.Layout.MainLayout
+@inject ISchemaSnapshotRepository SnapshotRepo
+@inject SchemaDoc.Web.Services.SchemaSessionState State
+@implements IDisposable
+
+<PageTitle>Server Snapshots – SchemaDoc</PageTitle>
+
+<div class="p-8 max-w-5xl mx-auto">
+    @if (State.ActiveConnection is null)
+    {
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Server Snapshots</h1>
+        <div class="text-center py-16 text-gray-400 dark:text-gray-500">
+            <div class="text-5xl mb-4">📸</div>
+            <p class="text-lg mb-2">No server connected</p>
+            <p class="text-sm">Connect to a server first from the
+                <a href="/connections" class="text-blue-500 hover:underline">Connections</a> page.
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="flex items-baseline gap-2 mb-2">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Server Snapshots</h1>
+            <span class="text-base text-gray-400 dark:text-gray-500">·</span>
+            <span class="text-base text-gray-600 dark:text-gray-300">@State.ActiveConnection.Name</span>
+        </div>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            Every saved snapshot on this server, grouped by database. The ⭐ marks each database's most recent snapshot.
+        </p>
+
+        @if (loading)
+        {
+            <div class="text-center py-16 text-sm text-gray-400 dark:text-gray-500">Loading…</div>
+        }
+        else if (groups.Count == 0)
+        {
+            <div class="text-center py-16 text-gray-400 dark:text-gray-500">
+                <div class="text-5xl mb-4">📸</div>
+                <p class="text-lg mb-2">No snapshots on this server yet</p>
+                <p class="text-sm">Connect to a database and click <strong>Save Snapshot</strong> on the
+                    <a href="/" class="text-blue-500 hover:underline">home page</a>.
+                </p>
+            </div>
+        }
+        else
+        {
+            <div class="space-y-6">
+                @foreach (var group in groups)
+                {
+                    <div @key="group.Key">
+                        <div class="flex items-baseline gap-2 mb-2">
+                            <h2 class="text-sm font-semibold text-gray-700 dark:text-gray-200">@group.Key</h2>
+                            <span class="text-xs text-gray-400 dark:text-gray-500">@group.Value.Count snapshot(s)</span>
+                        </div>
+                        <SnapshotTable @key="group.Key" Snapshots="group.Value" OnChanged="ReloadAsync" />
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    // Database name -> its snapshots (newest first). Ordered by database name.
+    private List<KeyValuePair<string, List<SnapshotSummary>>> groups = [];
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.OnChanged += OnSessionChanged;
+        await ReloadAsync();
+    }
+
+    private void OnSessionChanged() => InvokeAsync(async () =>
+    {
+        // Switching the active server/connection changes which snapshots to show.
+        await ReloadAsync();
+        StateHasChanged();
+    });
+
+    private async Task ReloadAsync()
+    {
+        if (State.ActiveConnection is null)
+        {
+            groups = [];
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        var all = await SnapshotRepo.GetByConnectionAsync(State.ActiveConnection.Id);
+        groups = all
+            .GroupBy(s => s.DatabaseName)
+            .OrderBy(g => g.Key)
+            .Select(g => new KeyValuePair<string, List<SnapshotSummary>>(
+                g.Key, g.OrderByDescending(s => s.ExtractedAt).ThenByDescending(s => s.Id).ToList()))
+            .ToList();
+        loading = false;
+    }
+
+    public void Dispose()
+    {
+        State.OnChanged -= OnSessionChanged;
+    }
+}

@@ -69,9 +69,10 @@
                         {
                             <option value="0">(no snapshots for this database)</option>
                         }
-                        @foreach (var snap in baselineSnapshotOptions)
+                        @for (var i = 0; i < baselineSnapshotOptions.Count; i++)
                         {
-                            <option value="@snap.Id">@FormatSnapshotLabel(snap)</option>
+                            var snap = baselineSnapshotOptions[i];
+                            <option value="@snap.Id">@FormatSnapshotLabel(snap, i == 0)</option>
                         }
                     </select>
                 </div>
@@ -110,9 +111,10 @@
                         {
                             <option value="0">(no snapshots for this database)</option>
                         }
-                        @foreach (var snap in compareSnapshotOptions)
+                        @for (var i = 0; i < compareSnapshotOptions.Count; i++)
                         {
-                            <option value="@snap.Id">@FormatSnapshotLabel(snap)</option>
+                            var snap = compareSnapshotOptions[i];
+                            <option value="@snap.Id">@FormatSnapshotLabel(snap, i == 0)</option>
                         }
                     </select>
                 </div>
@@ -853,17 +855,22 @@
         var snaps = allSnapshots
             .Where(s => s.ConnectionId == connId && s.DatabaseName == dbName)
             .OrderByDescending(s => s.ExtractedAt)
+            .ThenByDescending(s => s.Id)
             .ToList();
         if (isBaseline) baselineSnapshotOptions = snaps;
         else compareSnapshotOptions = snaps;
     }
 
-    private static string FormatSnapshotLabel(SnapshotSummary snap)
+    // The ⭐ marks the freshest snapshot for the selected database (the options are
+    // built newest-first, so the caller passes isFreshest for index 0). Older ones
+    // show a camera. Named snapshots show their name; unnamed show the timestamp only.
+    private static string FormatSnapshotLabel(SnapshotSummary snap, bool isFreshest)
     {
         var ts = snap.ExtractedAt.ToLocalTime().ToString("g");
+        var marker = isFreshest ? "⭐" : "📷";
         return string.IsNullOrEmpty(snap.Name)
-            ? $"📷 {ts}"
-            : $"⭐ {snap.Name} — {ts}";
+            ? $"{marker} {ts}"
+            : $"{marker} {snap.Name} — {ts}";
     }
 
     private async Task RunDiff()

@@ -27,7 +27,9 @@
             <span class="text-xs text-gray-400 dark:text-gray-500">on @State.ActiveConnection.Name</span>
         </div>
         <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-            Saved schema captures for this database. Use the <a href="/diff" class="text-blue-500 hover:underline">Schema Diff</a> page to compare any two snapshots — even from databases on different networks.
+            Saved schema captures for this database. See
+            <a href="/server-snapshots" class="text-blue-500 hover:underline">all snapshots on this server</a>,
+            or use <a href="/diff" class="text-blue-500 hover:underline">Schema Diff</a> to compare any two — even from databases on different networks.
         </p>
 
         @if (loading)
@@ -46,79 +48,9 @@
         }
         else
         {
-            @if (statusMessage is not null)
-            {
-                <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 text-sm rounded-lg px-4 py-2 mb-4 flex items-center justify-between">
-                    <span>@statusMessage</span>
-                    <button class="text-green-500 hover:text-green-700" @onclick="() => statusMessage = null">×</button>
-                </div>
-            }
-
-            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-                <table class="w-full text-sm">
-                    <thead class="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
-                        <tr>
-                            <th class="text-left px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Name</th>
-                            <th class="text-left px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Tables</th>
-                            <th class="text-left px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Captured</th>
-                            <th class="text-right px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
-                        @foreach (var snap in snapshots)
-                        {
-                            var isEditing = editingId == snap.Id;
-                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                                <td class="px-4 py-3 align-top">
-                                    @if (isEditing)
-                                    {
-                                        <input type="text" @bind="editName" @bind:event="oninput"
-                                               placeholder="Name (leave blank for auto-managed)"
-                                               class="w-full border border-blue-300 dark:border-blue-600 rounded px-2 py-1 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 mb-1" />
-                                        <textarea @bind="editNotes" @bind:event="oninput" rows="2" placeholder="Notes (optional)"
-                                                  class="w-full border border-blue-300 dark:border-blue-600 rounded px-2 py-1 text-xs bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"></textarea>
-                                    }
-                                    else if (string.IsNullOrEmpty(snap.Name))
-                                    {
-                                        <span class="italic text-gray-400 dark:text-gray-500">📷 (legacy auto-saved)</span>
-                                    }
-                                    else
-                                    {
-                                        <div class="font-medium text-gray-800 dark:text-gray-100 flex items-center gap-1">
-                                            <span class="text-amber-500">⭐</span>
-                                            @snap.Name
-                                        </div>
-                                        @if (!string.IsNullOrWhiteSpace(snap.Notes))
-                                        {
-                                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-xl">@snap.Notes</div>
-                                        }
-                                    }
-                                </td>
-                                <td class="px-4 py-3 align-top text-gray-500 dark:text-gray-400">@snap.TableCount</td>
-                                <td class="px-4 py-3 align-top text-gray-500 dark:text-gray-400 whitespace-nowrap">@snap.ExtractedAt.ToLocalTime().ToString("g")</td>
-                                <td class="px-4 py-3 align-top text-right whitespace-nowrap">
-                                    @if (isEditing)
-                                    {
-                                        <button class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-medium" @onclick="SaveEditAsync">Save</button>
-                                        <button class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1" @onclick="CancelEdit">Cancel</button>
-                                    }
-                                    else if (confirmingDeleteId == snap.Id)
-                                    {
-                                        <span class="text-xs text-red-500 mr-1">Confirm?</span>
-                                        <button class="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded font-medium" @onclick="() => DeleteAsync(snap.Id)">Delete</button>
-                                        <button class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1" @onclick="() => confirmingDeleteId = null">Cancel</button>
-                                    }
-                                    else
-                                    {
-                                        <button class="text-xs text-blue-600 dark:text-blue-400 hover:underline mr-2" @onclick="() => StartEdit(snap)">Rename</button>
-                                        <button class="text-xs text-red-500 dark:text-red-400 hover:underline" @onclick="() => confirmingDeleteId = snap.Id">Delete</button>
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+            @* @key by database so switching the active DB gives a fresh child —
+               clears any in-progress edit / delete-confirm / status from the old DB. *@
+            <SnapshotTable @key="State.ActiveDatabase" Snapshots="snapshots" OnChanged="ReloadAsync" />
         }
     }
 </div>
@@ -126,11 +58,6 @@
 @code {
     private List<SnapshotSummary> snapshots = [];
     private bool loading = true;
-    private int? editingId;
-    private string editName = "";
-    private string editNotes = "";
-    private int? confirmingDeleteId;
-    private string? statusMessage;
 
     protected override async Task OnInitializedAsync()
     {
@@ -141,8 +68,6 @@
     private void OnSessionChanged() => InvokeAsync(async () =>
     {
         // The active DB switched out from under us — reload the list.
-        editingId = null;
-        confirmingDeleteId = null;
         await ReloadAsync();
         StateHasChanged();
     });
@@ -160,42 +85,6 @@
         snapshots = (await SnapshotRepo.GetSnapshotListAsync(
             State.ActiveConnection.Id, State.ActiveDatabase)).ToList();
         loading = false;
-    }
-
-    private void StartEdit(SnapshotSummary snap)
-    {
-        editingId = snap.Id;
-        editName = snap.Name ?? "";
-        editNotes = snap.Notes ?? "";
-        confirmingDeleteId = null;
-    }
-
-    private void CancelEdit()
-    {
-        editingId = null;
-        editName = "";
-        editNotes = "";
-    }
-
-    private async Task SaveEditAsync()
-    {
-        if (editingId is null) return;
-        await SnapshotRepo.RenameAsync(editingId.Value, editName, editNotes);
-        statusMessage = string.IsNullOrWhiteSpace(editName)
-            ? "Snapshot is now unnamed."
-            : $"Renamed to \"{editName.Trim()}\".";
-        editingId = null;
-        editName = "";
-        editNotes = "";
-        await ReloadAsync();
-    }
-
-    private async Task DeleteAsync(int id)
-    {
-        await SnapshotRepo.DeleteAsync(id);
-        confirmingDeleteId = null;
-        statusMessage = "Snapshot deleted.";
-        await ReloadAsync();
     }
 
     public void Dispose()
