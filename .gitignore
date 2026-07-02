@@ -29,3 +29,6 @@ Thumbs.db
 
 # .NET publish single-file temp
 *.blob
+
+# Local-only project guide for Claude (kept on disk, never committed to any remote)
+CLAUDE.md
