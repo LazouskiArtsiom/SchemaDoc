@@ -9,25 +9,27 @@
 
 <PageTitle>SchemaDoc</PageTitle>
 
-<div class="flex items-center justify-center h-full text-center p-8">
+<div class="h-full overflow-y-auto p-8">
     @if (State.CurrentSchema is null)
     {
-        <div>
-            <div class="text-6xl mb-4">🗄️</div>
-            <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">Welcome to SchemaDoc</h1>
-            <p class="text-gray-500 dark:text-gray-400 mb-6">Connect to a database to start exploring and documenting your schema.</p>
-            <a href="/connections"
-               class="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 no-underline transition-colors">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                Add Connection
-            </a>
+        <div class="flex items-center justify-center min-h-full text-center">
+            <div>
+                <div class="text-6xl mb-4">🗄️</div>
+                <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">Welcome to SchemaDoc</h1>
+                <p class="text-gray-500 dark:text-gray-400 mb-6">Connect to a database to start exploring and documenting your schema.</p>
+                <a href="/connections"
+                   class="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 no-underline transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add Connection
+                </a>
+            </div>
         </div>
     }
     else
     {
-        <div class="max-w-xl">
+        <div class="max-w-2xl mx-auto text-center">
             <div class="text-5xl mb-4">✅</div>
             <div class="flex items-center justify-center gap-2 mb-1 flex-wrap">
                 @if (!string.IsNullOrEmpty(State.ActiveDbTag))
@@ -178,15 +180,6 @@
                     </svg>
                     Save Snapshot
                 </button>
-                <a href="/snapshots"
-                   class="inline-flex items-center gap-2 bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800 px-4 py-2 rounded-lg text-sm font-medium hover:bg-cyan-100 dark:hover:bg-cyan-900/50 no-underline transition-colors">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    Snapshots@(snapshotCount > 0 ? $" ({snapshotCount})" : "")
-                </a>
                 <a href="/connections"
                    class="inline-flex items-center gap-2 bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-600 no-underline transition-colors">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -211,7 +204,28 @@
                 </div>
             </div>
 
-            <p class="mt-6 text-sm text-gray-400 dark:text-gray-500">Select a table from the sidebar to start exploring.</p>
+            <!-- Snapshots for this database -->
+            <div class="text-left mt-6">
+                <div class="flex items-center gap-2 mb-2">
+                    <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Snapshots</h3>
+                    @if (snapshots.Count > 0)
+                    {
+                        <span class="text-xs text-gray-400 dark:text-gray-500">@snapshots.Count</span>
+                    }
+                </div>
+                @if (snapshots.Count == 0)
+                {
+                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-6 text-center text-sm text-gray-400 dark:text-gray-500">
+                        No snapshots for this database yet. Click <strong>Save Snapshot</strong> above to capture one.
+                    </div>
+                }
+                else
+                {
+                    <SnapshotTable @key="State.ActiveDatabase" Snapshots="snapshots" OnChanged="LoadSnapshotsAsync" />
+                }
+            </div>
+
+            <p class="mt-6 text-xs text-gray-400 dark:text-gray-500">Select a table from the sidebar to explore its structure.</p>
         </div>
     }
 </div>
@@ -236,8 +250,8 @@
     // Tracks which DB the editor was opened for, so we can close it when the user switches DBs
     private string? editorOwnerDb;
 
-    // Snapshot count for the active database — shown on the Snapshots quick link.
-    private int snapshotCount;
+    // Snapshots for the active database — rendered directly on this page.
+    private List<SnapshotSummary> snapshots = [];
 
     private static readonly (string Name, string Bg)[] tagColorOptions =
     [
@@ -270,7 +284,7 @@
                 Nav.NavigateTo("/connections");
         }
         await LoadTagOverrideAsync();
-        await LoadSnapshotCountAsync();
+        await LoadSnapshotsAsync();
     }
 
     private void OnStateChanged() => InvokeAsync(async () =>
@@ -290,19 +304,19 @@
             snapshotNotes = "";
         }
         await LoadTagOverrideAsync();
-        await LoadSnapshotCountAsync();
+        await LoadSnapshotsAsync();
         StateHasChanged();
     });
 
-    private async Task LoadSnapshotCountAsync()
+    private async Task LoadSnapshotsAsync()
     {
         if (State.ActiveConnection is null || State.ActiveDatabase is null)
         {
-            snapshotCount = 0;
+            snapshots = [];
             return;
         }
-        snapshotCount = await SnapshotRepo.GetCountAsync(
-            State.ActiveConnection.Id, State.ActiveDatabase);
+        snapshots = (await SnapshotRepo.GetSnapshotListAsync(
+            State.ActiveConnection.Id, State.ActiveDatabase)).ToList();
     }
 
     private void ToggleTagEditor()
@@ -399,7 +413,7 @@
             await SnapshotRepo.SaveAsync(State.ActiveConnection.Id, schema, snapshotName.Trim(), snapshotNotes);
             snapshotMessage = $"Saved snapshot \"{snapshotName.Trim()}\" for {State.ActiveDatabase}.";
             showSaveSnapshot = false;
-            await LoadSnapshotCountAsync();
+            await LoadSnapshotsAsync();
         }
         catch (Exception ex)
         {

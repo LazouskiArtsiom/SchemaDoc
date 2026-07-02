@@ -2,6 +2,7 @@
 @layout SchemaDoc.Web.Components.Layout.MainLayout
 @inject ISchemaSnapshotRepository SnapshotRepo
 @inject SchemaDoc.Web.Services.SchemaSessionState State
+@inject SchemaDoc.Web.Services.SchemaLoaderService SchemaLoader
 @implements IDisposable
 
 <PageTitle>Server Snapshots – SchemaDoc</PageTitle>
@@ -20,14 +21,50 @@
     }
     else
     {
-        <div class="flex items-baseline gap-2 mb-2">
-            <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Server Snapshots</h1>
-            <span class="text-base text-gray-400 dark:text-gray-500">·</span>
-            <span class="text-base text-gray-600 dark:text-gray-300">@State.ActiveConnection.Name</span>
+        <div class="flex items-center justify-between gap-3 mb-6 flex-wrap">
+            <div class="flex items-baseline gap-2">
+                <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">Server Snapshots</h1>
+                <span class="text-base text-gray-400 dark:text-gray-500">·</span>
+                <span class="text-base text-gray-600 dark:text-gray-300">@State.ActiveConnection.Name</span>
+            </div>
+            <button @onclick="SnapshotAllAsync" disabled="@snapshotting"
+                    title="Capture a snapshot of every database on this server"
+                    class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                @(snapshotting ? $"Snapshotting… ({doneCount}/{totalCount})" : "Snapshot all databases")
+            </button>
         </div>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-            Every saved snapshot on this server, grouped by database. The ⭐ marks each database's most recent snapshot.
-        </p>
+
+        @if (snapshotting && currentDb is not null)
+        {
+            <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-sm rounded-lg px-4 py-2 mb-4">
+                Capturing <strong>@currentDb</strong>… (@doneCount / @totalCount)
+            </div>
+        }
+
+        @if (resultMessage is not null)
+        {
+            var ok = failures.Count == 0;
+            <div class="@(ok ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300" : "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300") border text-sm rounded-lg px-4 py-2 mb-4">
+                <div class="flex items-center justify-between">
+                    <span>@resultMessage</span>
+                    <button class="opacity-70 hover:opacity-100" @onclick="() => resultMessage = null">×</button>
+                </div>
+                @if (failures.Count > 0)
+                {
+                    <ul class="mt-1 list-disc list-inside text-xs">
+                        @foreach (var f in failures)
+                        {
+                            <li>@f</li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
 
         @if (loading)
         {
@@ -38,8 +75,8 @@
             <div class="text-center py-16 text-gray-400 dark:text-gray-500">
                 <div class="text-5xl mb-4">📸</div>
                 <p class="text-lg mb-2">No snapshots on this server yet</p>
-                <p class="text-sm">Connect to a database and click <strong>Save Snapshot</strong> on the
-                    <a href="/" class="text-blue-500 hover:underline">home page</a>.
+                <p class="text-sm">Use <strong>Snapshot all databases</strong> above to capture every database at once,
+                    or save a single database from the <a href="/" class="text-blue-500 hover:underline">home page</a>.
                 </p>
             </div>
         }
@@ -65,6 +102,14 @@
     // Database name -> its snapshots (newest first). Ordered by database name.
     private List<KeyValuePair<string, List<SnapshotSummary>>> groups = [];
     private bool loading = true;
+
+    // Bulk "snapshot all databases" state.
+    private bool snapshotting;
+    private int doneCount;
+    private int totalCount;
+    private string? currentDb;
+    private string? resultMessage;
+    private List<string> failures = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -98,6 +143,70 @@
             .ToList();
         loading = false;
     }
+
+    /// <summary>
+    /// Captures one snapshot of every database on the active server. Each database is
+    /// extracted live and saved as a durable named snapshot ("{server}/{db}/{time}").
+    /// Databases that fail (permission, offline, etc.) are skipped and reported; the
+    /// rest still complete. After this, all databases are viewable offline from the
+    /// stored snapshots without reconnecting.
+    /// </summary>
+    private async Task SnapshotAllAsync()
+    {
+        if (State.ActiveConnection is null || snapshotting) return;
+        var conn = State.ActiveConnection;
+
+        snapshotting = true;
+        doneCount = 0;
+        totalCount = 0;
+        currentDb = null;
+        resultMessage = null;
+        failures = [];
+        StateHasChanged();
+
+        try
+        {
+            var dbs = await SchemaLoader.ListDatabasesAsync(conn.Id, conn.Provider);
+            totalCount = dbs.Count;
+            var stamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+
+            foreach (var db in dbs)
+            {
+                currentDb = db;
+                StateHasChanged();
+                await Task.Yield(); // let the progress line render before the extraction
+
+                try
+                {
+                    var schema = await SchemaLoader.LoadSchemaAsync(conn.Id, conn.Provider, db, forceRefresh: true);
+                    await SnapshotRepo.SaveAsync(conn.Id, schema, $"{conn.Name}/{db}/{stamp}", null);
+                    doneCount++;
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{db}: {FirstLine(ex.Message)}");
+                }
+            }
+
+            resultMessage = failures.Count == 0
+                ? $"Saved snapshots for {doneCount} database(s)."
+                : $"Saved {doneCount} of {totalCount} database(s); {failures.Count} failed.";
+        }
+        catch (Exception ex)
+        {
+            resultMessage = $"Could not list databases on {conn.Name}: {FirstLine(ex.Message)}";
+        }
+        finally
+        {
+            snapshotting = false;
+            currentDb = null;
+            await ReloadAsync();
+            StateHasChanged();
+        }
+    }
+
+    private static string FirstLine(string s) =>
+        string.IsNullOrEmpty(s) ? s : s.Split('\n')[0].Trim();
 
     public void Dispose()
     {
